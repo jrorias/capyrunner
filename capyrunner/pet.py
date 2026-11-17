@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 
@@ -27,6 +27,9 @@ class PetWindow(QWidget):
         self.setWindowTitle("CapyRunner")
         self._pix: QPixmap | None = None
         self._bubble = ""
+        self._caption = ""            # small standing line (what is playing), shown when no bubble is up
+        self.font_px = 13
+        self._clip_l = self._clip_r = 0   # how much of the window hangs off the left / right screen edge
         self._hop = 0
         self._spin = 0.0
         self.top_layout = False       # True while running along the top edge: pet on top, bubble below
@@ -68,6 +71,23 @@ class PetWindow(QWidget):
         self._bubble_timer.start(ms)
         self.update()
 
+    def set_caption(self, text: str) -> None:
+        if text != self._caption:
+            self._caption = text
+            self.update()
+
+    def set_font_px(self, px: int) -> None:
+        px = max(10, min(18, int(px)))
+        if px != self.font_px:
+            self.font_px = px
+            self.update()
+
+    def set_clip(self, left: int, right: int) -> None:
+        left, right = max(0, int(left)), max(0, int(right))
+        if (left, right) != (self._clip_l, self._clip_r):
+            self._clip_l, self._clip_r = left, right
+            self.update()
+
     def _clear_bubble(self):
         self._bubble = ""
         self.update()
@@ -80,31 +100,45 @@ class PetWindow(QWidget):
         p.setCompositionMode(QPainter.CompositionMode_SourceOver)
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        if self._bubble:
+        text = self._bubble or self._caption
+        if text:
+            small = not self._bubble                 # the quiet "now playing" line is a size smaller
             f = QFont()
-            f.setPixelSize(13)
+            f.setPixelSize(max(9, self.font_px - (2 if small else 0)))
+            f.setWeight(QFont.Medium if small else QFont.DemiBold)
             p.setFont(f)
             fm = QFontMetrics(f)
-            text = fm.elidedText(self._bubble, Qt.ElideRight, (self.width() - 24) * 2)
+            # only the part of the window that is on the screen may be used
+            lo, hi = 4 + self._clip_l, self.width() - 4 - self._clip_r
+            max_w = max(60, hi - lo)
+            lines_h = self.BUBBLE_H - 12 - 8
+            max_lines = 1 if small else max(1, lines_h // fm.lineSpacing())
+            text = fm.elidedText(" ".join(text.split()), Qt.ElideRight, int((max_w - 18) * max_lines * 0.92))
+            flags = Qt.AlignCenter | (Qt.TextWordWrap if max_lines > 1 else Qt.TextSingleLine)
+            br = fm.boundingRect(QRect(0, 0, max_w - 18, lines_h), flags, text)
+            bw = min(max_w, max(44, br.width() + 20))
+            bh = min(self.BUBBLE_H - 12, br.height() + 12)
+            cx = self.width() // 2
+            bx = int(min(max(cx - bw / 2, lo), hi - bw))     # centred on the pet, pushed back on screen
+            px = min(max(cx, bx + 12), bx + bw - 12)         # the little pointer stays over the pet
             path = QPainterPath()
-            cx = (self.width()) // 2
             if self.top_layout:           # bubble under the pet, pointer up
-                r = QRect(4, self.pet_size + 10, self.width() - 8, self.BUBBLE_H - 12)
-                path.addRoundedRect(r, 10, 10)
-                path.moveTo(cx - 8, r.top())
-                path.lineTo(cx, r.top() - 9)
-                path.lineTo(cx + 8, r.top())
+                r = QRect(bx, self.pet_size + 10, bw, bh)
+                path.addRoundedRect(r, 9, 9)
+                path.moveTo(px - 7, r.top())
+                path.lineTo(px, r.top() - 8)
+                path.lineTo(px + 7, r.top())
             else:
-                r = QRect(4, 2, self.width() - 8, self.BUBBLE_H - 12)
-                path.addRoundedRect(r, 10, 10)
-                path.moveTo(cx - 8, r.bottom())
-                path.lineTo(cx, r.bottom() + 9)
-                path.lineTo(cx + 8, r.bottom())
-            p.setPen(QColor("#555"))
-            p.setBrush(QColor(255, 255, 255, 240))
+                r = QRect(bx, self.BUBBLE_H - 10 - bh, bw, bh)
+                path.addRoundedRect(r, 9, 9)
+                path.moveTo(px - 7, r.bottom())
+                path.lineTo(px, r.bottom() + 8)
+                path.lineTo(px + 7, r.bottom())
+            p.setPen(QPen(QColor("#3A2414"), 1.6))
+            p.setBrush(QColor(255, 255, 255, 215 if small else 250))
             p.drawPath(path.simplified())
-            p.setPen(QColor("#222"))
-            p.drawText(r.adjusted(8, 4, -8, -4), Qt.AlignCenter | Qt.TextWordWrap, text)
+            p.setPen(QColor("#1B1B1B"))
+            p.drawText(r.adjusted(8, 3, -8, -3), flags, text)
         if self._pix:
             s = self.pet_size
             x = (self.width() - s) // 2

@@ -14,13 +14,14 @@ import time
 from datetime import datetime
 
 import psutil
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QTransform
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QInputDialog, QMenu,
                                QMessageBox, QSystemTrayIcon)
 
-from . import __version__, autostart, quickadd
+from . import __version__, activity, autostart, quickadd
+from .controls import ControlPanel
 from .characters import BASE, BUILTIN, ROPE_X, FrameSet, load_frames, with_badge
 from .panel import Panel
 from .pet import PetWindow, RopeWindow
@@ -48,7 +49,7 @@ class CapyRunner:
 
         self.pet = PetWindow(store.settings["pet_size"])
         self.pet.open_panel.connect(self.panel.show_and_raise)
-        self.pet.context_menu.connect(lambda pos: self.menu.popup(pos))
+        self.pet.context_menu.connect(self.show_controls)
         self.pet.moved.connect(self._pet_moved)
         self.pet.clicked.connect(self._pet_clicked)
         self.pet.grabbed.connect(self._pet_grabbed)
@@ -57,6 +58,7 @@ class CapyRunner:
         self.pet.wheeled.connect(self._pet_step_aside)
 
         self.rope = RopeWindow()
+        self.controls = ControlPanel(self)
 
         # roaming state: one lap = run right along the bottom, climb the rope on the right edge
         # (sometimes slipping), run left along the top, slide down the left edge, jog a bit, nap.
@@ -85,6 +87,10 @@ class CapyRunner:
         self.next_break = time.time() + random.uniform(15, 35)
         self.next_chat = time.time() + random.uniform(90, 180)
         self.flipped: FrameSet = FrameSet([])
+        # joining in with what the user is doing: music, a video, reading (see activity.py)
+        self.activity = activity.Activity()
+        self.act_seen = 0.0               # last time an activity was detected (short gaps don't end it)
+        self.act_drop = False             # hopping down from the rope to join in: no dizzy stars
 
         self.tray = QSystemTrayIcon()
         self.tray.activated.connect(self._tray_activated)
@@ -101,6 +107,7 @@ class CapyRunner:
         self.stats_timer = QTimer(interval=1500, timeout=self.update_stats)
         self.remind_timer = QTimer(interval=15_000, timeout=self.check_reminders)
         self.roam_timer = QTimer(interval=33, timeout=self._roam)
+        self.activity_timer = QTimer(interval=3000, timeout=self._poll_activity)
 
         psutil.cpu_percent(None)  # prime
         self.apply_settings(first=True)
@@ -109,6 +116,7 @@ class CapyRunner:
         self.stats_timer.start()
         self.remind_timer.start()
         self.roam_timer.start()
+        self.activity_timer.start()
         self.anim.start(100)
         if store.settings.get("greetings", True):
             QTimer.singleShot(1200, lambda: self.chat(hello=True))
@@ -118,6 +126,7 @@ class CapyRunner:
     # ================================================================== #
     def _build_menu(self) -> QMenu:
         m = QMenu()
+        m.addAction("Primo controls…", lambda: self.show_controls())
         m.addAction("Open tasks && notes", self.panel.show_and_raise)
         m.addAction("Quick add task…", self.quick_add)
         self.act_notifs = m.addAction("Notifications", self.panel.show_notifications)
@@ -155,6 +164,26 @@ class CapyRunner:
         self.act_roam = QAction("Run around the screen", m, checkable=True)
         self.act_roam.toggled.connect(lambda on: self._set("pet_roam", on))
         m.addAction(self.act_roam)
+        jm = m.addMenu("When something is playing, Primo…")
+        self.join_group = QActionGroup(jm)
+        for key, label in (("auto", "Decides by himself (auto)"), ("listen", "🎧 Listens with headphones"),
+                           ("watch", "📱 Watches cosy, on his phone"), ("movie", "🍿 Watches with popcorn"),
+                           ("study", "📝 Takes notes (tutorial / podcast)"), ("read", "📖 Reads a book")):
+            a = QAction(label, jm, checkable=True)
+            a.setData(key)
+            self.join_group.addAction(a)
+            jm.addAction(a)
+        self.join_group.triggered.connect(lambda a: (self._set("activity_mode", a.data()), self._poll_activity()))
+
+        mm = m.addMenu("Media && volume")
+        mm.addAction("⏯  Play / pause", lambda: self._media("play-pause"))
+        mm.addAction("⏭  Next", lambda: self._media("next"))
+        mm.addAction("⏮  Previous", lambda: self._media("previous"))
+        mm.addSeparator()
+        mm.addAction("🔊  Volume up", lambda: self._volume(+10))
+        mm.addAction("🔉  Volume down", lambda: self._volume(-10))
+        mm.addAction("🔇  Mute / unmute", lambda: self._volume(mute=True))
+
         self.act_dnd = QAction("Do not disturb", m, checkable=True)
         self.act_dnd.toggled.connect(lambda on: self._set("dnd", on))
         m.addAction(self.act_dnd)
@@ -171,6 +200,8 @@ class CapyRunner:
             a.setChecked(a.data() == s["speed_source"])
         for a in self.char_group.actions():
             a.setChecked(a.data() == s["character"])
+        for a in self.join_group.actions():
+            a.setChecked(a.data() == s.get("activity_mode", "auto"))
         for act, key in ((self.act_pet, "show_pet"), (self.act_pass, "pet_ghost"),
                          (self.act_roam, "pet_roam"), (self.act_dnd, "dnd")):
             act.blockSignals(True)
@@ -235,6 +266,9 @@ class CapyRunner:
             if err and not first:
                 QMessageBox.warning(None, "CapyRunner", err)
         self._sync_menu()
+        self._update_caption()
+        if self.controls.isVisible():
+            self.controls.sync()
         self.panel.refresh_notifs()
 
     def open_settings(self):
@@ -255,6 +289,7 @@ class CapyRunner:
             self._sync_menu()
 
     def _pet_moved(self, x, y):
+        self._clip_bubble()
         self.store.settings["pet_pos"] = [x, y]
         self.store.save_settings()
 
@@ -318,6 +353,10 @@ class CapyRunner:
         if self._on_break() and not excited and not asleep:
             pm = frames[0]                                   # standing still while chatting
         special = self._special_frame(fs) if (roaming and not excited and not asleep) else None
+        if not roaming and not excited and self.activity:          # staying put: join in right there
+            pose = self._activity_frame(fs)
+            if pose is not None:
+                special, asleep = pose, False
         if self.held and self.pet._press is not None and fs.extra.get("angry"):
             ang = fs.extra["angry"]
             special = ang[int(time.time() * 12) % len(ang)]
@@ -495,14 +534,121 @@ class CapyRunner:
         self.pet.set_top_layout(top_layout)
         y = self.roam_y + (self.pet.BUBBLE_H if top_layout else 0)
         self.pet.move(int(self.roam_x), int(y))
+        self._clip_bubble()
+
+    def _clip_bubble(self):
+        """Tell the pet how much of its window hangs off the screen, so the bubble stays readable."""
+        pet = self.pet
+        screen = self.app.screenAt(pet.frameGeometry().center()) or pet.screen() or self.app.primaryScreen()
+        g = screen.geometry()
+        pet.set_clip(g.left() - pet.x(), pet.x() + pet.width() - (g.right() + 1))
 
     CLIMB_RATE = 4.5      # rad/s; one full hand-over-hand cycle = 2*pi / CLIMB_RATE seconds
+
+    # ---- joining in: headphones for music, popcorn for a video, a book when reading ---------- #
+    ACT_FPS = {"happy": 9, "hype": 16, "chill": 5, "sad": 4, "love": 7}
+
+    def _poll_activity(self):
+        s = self.store.settings
+        if not s.get("activity_react", True) or not self.pet.isVisible():
+            self.activity = activity.Activity()
+            return
+        try:
+            new = activity.detect(s.get("study_words") or ())
+        except Exception:
+            new = activity.Activity()
+        forced = s.get("activity_mode", "auto")
+        if new and forced in activity.KINDS and forced != new.kind:      # you chose how he joins in
+            new = activity.Activity(forced, new.title, new.artist, new.mood, new.music or new.kind == "listen")
+        now = time.time()
+        if new:
+            self.act_seen = now
+        elif self.activity and now - self.act_seen < 8:      # gap between songs, quick alt-tab…
+            return
+        old, self.activity = self.activity, new
+        self._update_caption()
+        if not new or not self.frames.extra.get("watch"):
+            return
+        if new.kind != old.kind:
+            self.pet.say({"listen": "Ooh, music! 🎧", "watch": "Comfy… let's watch! 📱",
+                          "movie": "Movie time! 🍿", "study": "Notes ready! 📝",
+                          "read": "Reading time… 📖"}[new.kind], 3500)
+        elif new.kind == "listen" and new.label and new.label != old.label:
+            face = {"hype": "🔥", "chill": "😌", "sad": "🥺", "love": "💕"}.get(new.mood, "🎵")
+            self.pet.say(f"{face} New song!", 2500)
+
+    ACT_ICON = {"listen": "🎧", "watch": "📱", "movie": "🍿", "study": "📝", "read": "📖"}
+
+    def _short(self, text: str, n: int = 44) -> str:
+        text = " ".join(text.split())
+        return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+    def _update_caption(self):
+        """The small standing line above the pet: mode icon + what is playing."""
+        act, s = self.activity, self.store.settings
+        self.pet.set_font_px(int(s.get("bubble_font", 13)))
+        if not act or not s.get("activity_caption", True) or not self.frames.extra.get("watch"):
+            self.pet.set_caption("")
+            return
+        icon = self.ACT_ICON.get(act.kind, "")
+        if act.kind == "read":
+            text = f"{icon} Reading" + (f" · 🎧 {self._short(act.title, 26)}" if act.music and act.title else "")
+        else:
+            text = f"{icon} {self._short(act.title, 34)}" if act.title else icon
+        self.pet.set_caption(text)
+
+    # ---- media keys and volume ------------------------------------------------------------- #
+    def _media(self, cmd: str):
+        activity.media(cmd)
+        QTimer.singleShot(500, self._poll_activity)
+
+    def _volume(self, delta: int = 0, mute: bool = False):
+        if mute:
+            activity.toggle_mute()
+        else:
+            cur = activity.get_volume()
+            if cur is None:
+                return
+            activity.set_volume(cur[0] + delta)
+        cur = activity.get_volume()
+        if cur and self.pet.isVisible():
+            self.pet.say("🔇 Muted" if cur[1] else f"🔊 {cur[0]}%", 1500)
+        self._sync_volume()
+
+    def _sync_volume(self):
+        if self.controls.isVisible():
+            self.controls.sync_volume()
+
+    def show_controls(self, pos=None):
+        """The control panel: a normal window with a Close button (pop-up menus can get stuck on Wayland)."""
+        if pos is None:
+            pos = self.pet.frameGeometry().center() if self.pet.isVisible() else self.app.primaryScreen().geometry().center()
+        self.controls.open_near(pos)
+
+    def _activity_frame(self, fs: FrameSet):
+        act, ex, now = self.activity, fs.extra, time.time()
+        if not act or not ex:
+            return None
+        if act.kind == "listen":
+            name, fps = f"listen_{act.mood}", self.ACT_FPS.get(act.mood, 9)
+        elif act.kind == "watch":
+            name, fps = "bed", 3
+        elif act.kind == "movie":
+            name, fps = "watch", 3
+        elif act.kind == "study":
+            name, fps = "study", 2.5
+        else:
+            name, fps = ("read_hp" if act.music else "read"), 4
+        fr = ex.get(name)
+        return fr[int(now * fps) % len(fr)] if fr else None
 
     def _special_frame(self, fs: FrameSet):
         """Rope poses (only characters that have them, i.e. Primo)."""
         ex, ph, now = fs.extra, self.phase, time.time()
         if not ex:
             return None
+        if ph == "seat":
+            return self._activity_frame(fs)
 
         def pick(name: str, fps: float):
             fr = ex.get(name)
@@ -556,6 +702,16 @@ class CapyRunner:
             self.laugh_after = True
             self.phase, self.phase_until = "slip", time.time() + 0.5
             return
+        act = self.activity
+        if act and self.frames.extra.get("watch") and not self.store.unread():
+            label = self._short(act.label, 60)
+            msg = {"listen": f"🎧 {label}" if label else "🎧 Good song!",
+                   "watch": f"📱 {label}" if label else "📱 So comfy…",
+                   "movie": f"🍿 {label}" if label else "🍿 Shh, it's getting good!",
+                   "study": f"📝 {label}" if label else "📝 Taking notes!",
+                   "read": "📖 Shh… reading." + (f" (🎧 {label})" if act.music and label else "")}[act.kind]
+            self.pet.say(msg, 4500)
+            return
         self.chat(clicked=True)
 
     def _start_fall(self, then: str):
@@ -601,6 +757,34 @@ class CapyRunner:
         speed = (0.8 + max(self.level, 0.35) * 4.2) * (S / 96) * (1.6 if excited else 1)
         ph = self.phase
 
+        # something to join in with: go and sit on the right-hand side, facing the screen
+        act = self.activity if self.frames.extra.get("watch") else None
+        if act and ph in ("bottom_r", "bottom_end", "nap"):
+            self.napping, self.phase = False, "seat_go"
+            ph = "seat_go"
+        elif act and ph in ("climb", "top", "think", "descend") and not self.act_drop:
+            self.act_drop = True                      # up on the rope: hop down first
+            self._start_fall("bottom_r")
+            ph = self.phase
+        if ph in ("seat_go", "seat"):
+            seat_x = right - S * 0.25
+            self.roam_y = bottom
+            if not act:
+                self.phase, self.dir = "bottom_r", 1
+                self.next_break = now + random.uniform(15, 35)
+            elif ph == "seat_go":
+                step = speed * 1.4
+                if abs(seat_x - self.roam_x) <= step:
+                    self.roam_x, self.phase, self.dir = seat_x, "seat", -1
+                else:
+                    self.dir = 1 if seat_x > self.roam_x else -1
+                    self.roam_x += step * self.dir
+            else:
+                self.roam_x, self.dir = seat_x, -1
+            self.rope.set_active(False)
+            self._place()
+            return
+
         if ph == "nap":
             if now >= self.nap_until or excited:
                 self.napping, self.phase, self.dir = False, "bottom_r", 1
@@ -638,7 +822,11 @@ class CapyRunner:
             self.fall_v += 0.9
             self.roam_y += self.fall_v
             self.spin = (self.spin + 13) % 360
-            if self.roam_y >= bottom:                 # thud: sit there seeing stars
+            if self.roam_y >= bottom and self.act_drop:       # hopped down on purpose: lands on his feet
+                self.act_drop = False
+                self.roam_y, self.spin, self.phase = bottom, 0.0, "bottom_r"
+                self.excited_until = now + 1.0
+            elif self.roam_y >= bottom:               # thud: sit there seeing stars
                 self.roam_y, self.spin, self.phase = bottom, 0.0, "dizzy"
                 self.phase_until = now + random.uniform(2.4, 3.2)
         elif ph == "dizzy":
@@ -860,6 +1048,7 @@ def main(argv=None):
     ap.add_argument("--reset-position", action="store_true", help="move the floating pet back to the corner")
     ap.add_argument("--notify", nargs="+", metavar=("TITLE", "BODY"), help="send a notification to the running app via webhook")
     ap.add_argument("--settings", action="store_true", help="open the settings window (of the running app, if any)")
+    ap.add_argument("--controls", action="store_true", help="open Primo's control panel (of the running app, if any)")
     args, qt_args = ap.parse_known_args(argv)
 
     if args.notify:
@@ -884,7 +1073,7 @@ def main(argv=None):
     app.setDesktopFileName("capyrunner")
     app.setQuitOnLastWindowClosed(False)
 
-    server = _single_instance(f"capyrunner-{getpass.getuser()}", b"settings" if args.settings else b"show")
+    server = _single_instance(f"capyrunner-{getpass.getuser()}", b"settings" if args.settings else b"controls" if args.controls else b"show")
     if server is None:
         print("CapyRunner is already running — opened its " + ("settings." if args.settings else "window."))
         return 0
@@ -906,12 +1095,16 @@ def main(argv=None):
             msg = bytes(c.readAll().data())
             if msg.startswith(b"settings"):
                 QTimer.singleShot(0, runner.open_settings)
+            elif msg.startswith(b"controls"):
+                QTimer.singleShot(0, runner.show_controls)
             else:
                 runner.panel.show_and_raise()
         c.readyRead.connect(on_msg)
     server.newConnection.connect(on_conn)
     if args.settings:
         QTimer.singleShot(800, runner.open_settings)
+    if args.controls:
+        QTimer.singleShot(800, runner.show_controls)
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         print("Note: no system tray found (on GNOME install the 'AppIndicator' extension). "

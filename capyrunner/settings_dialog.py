@@ -127,6 +127,21 @@ class SettingsDialog(QDialog):
             f2.addRow(w)
         f2.addRow(self.pet_ghost)
         f2.addRow(self.pet_roam)
+        self.activity_react = QCheckBox("Joins in: headphones for music, popcorn for videos, a book when I read",
+                                        checked=self.s.get("activity_react", True))
+        self.activity_react.setToolTip("Linux: needs playerctl for music/video. Reading is detected on Hyprland.\n"
+                                       "The mood (happy, hype, chill, sad, love) is guessed from the song title and artist.")
+        f2.addRow(self.activity_react)
+        self.activity_caption = QCheckBox("Show a small line above him: mode icon + what is playing",
+                                          checked=self.s.get("activity_caption", True))
+        f2.addRow(self.activity_caption)
+        self.study_words = QLineEdit(", ".join(self.s.get("study_words") or []))
+        self.study_words.setPlaceholderText("e.g. NetworkChuck, Fireship, devlog")
+        self.study_words.setToolTip("Words or channel names, separated by commas. A video whose title or channel contains one\n"
+                                    "makes him put on glasses and take notes, like a tutorial or podcast.")
+        f2.addRow("Take notes for", self.study_words)
+        self.bubble_font = QSpinBox(minimum=10, maximum=18, value=int(self.s.get("bubble_font", 13)), suffix=" px")
+        f2.addRow("Speech bubble text size", self.bubble_font)
         f2.addRow(self.lap_falls)
         f2.addRow(self.lap_click_fall)
         f2.addRow(self.lap_sneak)
@@ -232,6 +247,10 @@ class SettingsDialog(QDialog):
         s["pet_size"] = self.pet_size.value()
         s["pet_ghost"] = self.pet_ghost.isChecked()
         s["pet_roam"] = self.pet_roam.isChecked()
+        s["activity_react"] = self.activity_react.isChecked()
+        s["activity_caption"] = self.activity_caption.isChecked()
+        s["study_words"] = [w.strip() for w in self.study_words.text().split(",") if w.strip()]
+        s["bubble_font"] = self.bubble_font.value()
         s["greetings"] = self.greetings.isChecked()
         s["max_fps"] = self.max_fps.value()
         s["dnd"] = self.dnd.isChecked()

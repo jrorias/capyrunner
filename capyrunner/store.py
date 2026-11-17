@@ -20,6 +20,11 @@ DEFAULT_SETTINGS = {
     "pet_size": 96,
     "pet_pos": None,              # [x, y]
     "pet_ghost": False,           # fully click-through: can't be touched at all (control it from the tray)
+    "activity_mode": "auto",      # auto | listen | watch | movie | study | read : how he joins in
+    "activity_caption": True,     # small line above him with the mode icon and what is playing
+    "study_words": [],            # extra words / channel names that mean "this is a tutorial or podcast"
+    "bubble_font": 13,            # speech bubble text size in px (10-18)
+    "activity_react": True,       # headphones for music, popcorn for videos, a book when you read
     "pet_roam": True,             # run back and forth along the bottom of the screen
     "greetings": False,           # say hello + friendly reminders in the speech bubble
     "max_fps": 14,

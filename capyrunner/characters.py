@@ -244,6 +244,11 @@ def _capy(hoodie: QColor, mode: str, t: float = 0.0, k: float = 0.0, zk: int = 0
     foot_b = foot_f = None         # …and where the hind feet grip
     bx, tilt = 0.0, 0.0            # body pressed toward the rope; head tilt (negative = looking up)
     lookx = 0.0                    # wide eyes: pupils glancing forward (+) / back (-)
+    worried = True                 # wide eyes come with worried brows unless this is off
+    hp = False                     # wearing headphones
+    prop, note_col = "", ""        # popcorn | book | bed | notes ; colour of floating music notes
+    glasses, brows, glow = False, "", 0
+    mood = ""
 
     # ---- pose parameters ------------------------------------------------- #
     dy, squash = 0.0, 0.0
@@ -329,6 +334,70 @@ def _capy(hoodie: QColor, mode: str, t: float = 0.0, k: float = 0.0, zk: int = 0
         dy = 8
         jx = math.sin(t) * 2.2
         eyes, mouth_kind, fx = "dizzy", "o", "stars"
+    elif mode == "listen":                 # sitting with headphones on; k picks the mood of the song
+        mood = ("happy", "hype", "chill", "sad", "love")[int(k) % 5]
+        hp, fx = True, "notes"
+        s_ = math.sin(t)
+        if mood == "hype":                           # head-banging, paws in the air
+            dy, tilt = 8 - abs(s_) * 5, s_ * 12
+            arm_back, arm_front = math.pi - 0.7 + s_ * 0.5, math.pi - 0.3 - s_ * 0.5
+            both_happy, mouth, note_col = True, 1.45, "#E53935"
+        elif mood == "chill":                        # eyes closed, slow sway
+            dy, tilt = 8, s_ * 5
+            arm_back, arm_front = 0.5, 0.75
+            both_happy, mouth, note_col = True, 0.0, "#29A3DA"
+        elif mood == "sad":                          # droopy, a tear rolling down
+            dy, tilt = 9, 7 + s_ * 2.5
+            arm_back, arm_front = 0.25, 0.35
+            eyes, mouth_kind, note_col = "sad", "pout", "#5C7CBA"
+        elif mood == "love":                         # paw on the cheek, hearts floating up
+            dy, tilt = 8 - abs(s_) * 1.5, -4 + s_ * 6
+            arm_len = 13
+            arm_back, arm_front = 0.6, math.pi - 0.8
+            both_happy, mouth, fx, note_col = True, 0.9, "hearts", "#F0527A"
+        else:                                        # happy: bobbing along, tapping the floor
+            dy, tilt = 8 - abs(s_) * 2.5, s_ * 8
+            arm_back, arm_front = 0.9 + s_ * 0.35, 1.15 - s_ * 0.35
+            both_happy, mouth, note_col = True, 1.0, "#FF8A00"
+    elif mode == "watch":                  # sitting with popcorn, eyes glued to the screen
+        dy, prop, eyes, worried, lookx = 8, "popcorn", "wide", False, 1.6
+        step = int(k) % 8                            # reach into the bucket, bring it to the mouth, munch
+        if step in (4, 5):
+            hand_f = (88, 60 + dy)
+            mouth_kind = "o"
+        else:
+            hand_f = (97, 86 + dy + (2 if step % 2 else 0))
+            mouth = 0.0 if step in (6, 7) else 0.55
+        hand_b = (86, 92 + dy)
+    elif mode == "bed":                    # cosy: pillow, blanket, headphones, a video on the phone
+        dy, tilt, prop, hp, eyes, worried = 8, 8, "bed", True, "wide", False
+        step = int(k) % 12
+        glow = step % 3                              # the screen flickers as the video plays
+        look, lookx, mouth = 2.3, 1.5, 0.0
+        if step in (7, 8, 9):                        # something funny on screen
+            eyes, both_happy, mouth, tilt = "normal", True, 1.0, 5
+        hand_b, hand_f = (91, 94 + dy), (101, 96 + dy)
+    elif mode == "study":                  # tutorial / podcast: glasses on, sitting up straight, taking notes
+        dy, prop, eyes, worried, glasses, brows = 7, "notes", "wide", False, True, "focus"
+        step = int(k) % 12
+        mouth = 0.0
+        if step >= 7:                                # head down, writing it down
+            tilt, look, lookx = 10, 2.5, 0.9
+            hand_f = (90 + (step % 2) * 5, 91 + dy + (step % 3))
+        else:                                        # listening closely, pencil ready, a little nod
+            tilt, look, lookx = -4 + (2 if step % 2 else 0), -0.4, 1.9
+            hand_f = (97, 74 + dy)
+            if step in (5, 6):
+                fx = "bulb"                          # aha!
+        hand_b = (83, 97 + dy)
+    elif mode in ("read", "read_hp"):      # sitting with a book and reading glasses
+        dy, tilt, prop, eyes, worried, glasses = 8, 9, "book", "wide", False, True
+        hp = mode == "read_hp"
+        look, lookx, mouth = 2.4, math.sin(t) * 1.3, 0.0     # eyes travelling along the lines
+        hand_b, hand_f = (88, 98 + dy), (96, 100 + dy)
+        if hp:
+            tilt += math.sin(t * 2) * 3
+            fx, note_col = "notes", "#FF8A00"
     else:  # sleep (sitting, eyes closed)
         dy = 8
         both_happy, mouth = True, 0.0
@@ -349,8 +418,19 @@ def _capy(hoodie: QColor, mode: str, t: float = 0.0, k: float = 0.0, zk: int = 0
         for (x, y, r) in [(14, 30, 7), (114, 18, 6), (20, 74, 4.5), (116, 66, 5)]:
             _star(p, QPointF(x, y + dy * 0.3), r)
 
+    if prop == "bed":                       # big soft pillow behind the back
+        p.setPen(QPen(QColor("#6C8EAD"), 2.4))
+        p.setBrush(QColor("#FDFDFB"))
+        p.save()
+        p.translate(38, cy + 2)
+        p.rotate(-12)
+        p.drawRoundedRect(QRectF(-17, -27, 34, 52), 14, 14)
+        p.setPen(QPen(QColor("#C9D6E2"), 1.6, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(-8, -12), QPointF(-3, 14))
+        p.restore()
+
     # ---- legs ------------------------------------------------------------ #
-    if mode not in ("sleep", "dizzy", "laugh", "tampo"):
+    if mode not in ("sleep", "dizzy", "laugh", "tampo", "listen", "watch", "read", "read_hp", "bed", "study"):
         for hx, a, foot in ((54 + bx, leg_a[1], foot_b), (70 + bx, leg_a[0], foot_f)):
             ln = 13.0
             if foot is not None:
@@ -468,9 +548,31 @@ def _capy(hoodie: QColor, mode: str, t: float = 0.0, k: float = 0.0, zk: int = 0
             p.setPen(Qt.NoPen)
             p.setBrush(INK)
             p.drawEllipse(QPointF(ex_ + 0.8 + lookx, ey_ + look), 2.3, 2.6)
-        p.setPen(QPen(INK, 2.4, Qt.SolidLine, Qt.RoundCap))          # worried brows
-        p.drawLine(QPointF(53, hy - 14), QPointF(63, hy - 17))
-        p.drawLine(QPointF(75, hy - 21), QPointF(86, hy - 17))
+        if brows == "focus":                # level, serious brows
+            p.setPen(QPen(INK, 2.6, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(QPointF(53, hy - 18), QPointF(64, hy - 18.5))
+            p.drawLine(QPointF(74, hy - 21.5), QPointF(86, hy - 20.5))
+        if worried:
+            p.setPen(QPen(INK, 2.4, Qt.SolidLine, Qt.RoundCap))      # worried brows
+            p.drawLine(QPointF(53, hy - 14), QPointF(63, hy - 17))
+            p.drawLine(QPointF(75, hy - 21), QPointF(86, hy - 17))
+    elif eyes == "sad":                     # drooping lids, brows raised in the middle, one tear
+        p.setPen(QPen(INK, 2.8, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        for (ex_, ey_, w_) in ((60, hy - 5, 9), (80, hy - 8, 8)):
+            lid = QPainterPath(QPointF(ex_ - w_ / 2, ey_ - 1))
+            lid.quadTo(ex_, ey_ + w_ * 0.6, ex_ + w_ / 2, ey_ - 1)
+            p.drawPath(lid)
+        p.setPen(QPen(INK, 2.4, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(53, hy - 12), QPointF(64, hy - 17))
+        p.drawLine(QPointF(75, hy - 20), QPointF(86, hy - 15))
+        ty = hy + 1 + (t / (2 * math.pi) % 1) * 12
+        tear = QPainterPath(QPointF(80, ty - 5))
+        tear.cubicTo(84, ty, 82.5, ty + 4, 80, ty + 4)
+        tear.cubicTo(77.5, ty + 4, 76, ty, 80, ty - 5)
+        p.setPen(QPen(QColor("#2E6FA8"), 1.4))
+        p.setBrush(QColor("#8FD3FF"))
+        p.drawPath(tear)
     elif eyes == "shut":
         p.setPen(QPen(INK, 2.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.setBrush(Qt.NoBrush)
@@ -524,12 +626,139 @@ def _capy(hoodie: QColor, mode: str, t: float = 0.0, k: float = 0.0, zk: int = 0
     if mode == "tampo":                     # puffed cheek
         p.setBrush(QColor(240, 110, 120, 190))
         p.drawEllipse(QPointF(58, hy + 7), 9, 6.5)
+    if glasses:                             # round reading glasses
+        p.setPen(QPen(INK, 1.9))
+        p.setBrush(QColor(255, 255, 255, 40))
+        p.drawEllipse(QPointF(60, hy - 5), 8.2, 8.2)
+        p.drawEllipse(QPointF(81, hy - 8), 8.8, 8.8)
+        p.drawLine(QPointF(68.2, hy - 6), QPointF(72.2, hy - 7))
+        p.drawLine(QPointF(51.8, hy - 5), QPointF(44, hy - 8))
+    if hp:                                  # headphones: band over the top, big cushion on the near side
+        band = QPainterPath(QPointF(46, hy - 2))
+        band.cubicTo(38, hy - 30, 60, hy - 40, 80, hy - 30)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(INK, 8.5, Qt.SolidLine, Qt.RoundCap))
+        p.drawPath(band)
+        p.setPen(QPen(QColor("#F2F2F2"), 4.5, Qt.SolidLine, Qt.RoundCap))
+        p.drawPath(band)
+        p.setPen(QPen(INK, 2.6))
+        p.setBrush(QColor("#E94B5B"))
+        p.drawRoundedRect(QRectF(36, hy - 10, 17, 25), 8, 8)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 110))
+        p.drawRoundedRect(QRectF(39.5, hy - 6, 4, 11), 2, 2)
     p.restore()
+
+    # ---- things held in the lap ------------------------------------------ #
+    if prop == "popcorn":
+        bucket = QPainterPath(QPointF(84, cy - 2))
+        bucket.lineTo(110, cy - 2)
+        bucket.lineTo(106, cy + 22)
+        bucket.lineTo(88, cy + 22)
+        bucket.closeSubpath()
+        for (kx, ky, kr) in ((88, cy - 5, 4.6), (95, cy - 8, 5.2), (102, cy - 6, 4.8), (107, cy - 3, 3.8), (98, cy - 3, 4.4)):
+            p.setPen(QPen(INK, 1.6))
+            p.setBrush(QColor("#FFF3C4"))
+            p.drawEllipse(QPointF(kx, ky), kr, kr)
+        p.setPen(QPen(INK, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(QColor("white"))
+        p.drawPath(bucket)
+        p.save()
+        p.setClipPath(bucket)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#E53935"))
+        for sx_ in (84, 94, 104):
+            p.drawRect(QRectF(sx_, cy - 3, 5, 26))
+        p.restore()
+        p.setPen(QPen(INK, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(bucket)
+        if hand_f is not None and hand_f[1] < cy - 20:      # a piece on its way to the mouth
+            p.setPen(QPen(INK, 1.4))
+            p.setBrush(QColor("#FFF3C4"))
+            p.drawEllipse(QPointF(hand_f[0] + 4, hand_f[1] - 5), 3.6, 3.6)
+    elif prop == "bed":
+        blanket = QPainterPath(QPointF(28, cy + 12))
+        blanket.cubicTo(44, cy + 3, 60, cy + 13, 76, cy + 8)
+        blanket.cubicTo(90, cy + 3, 104, cy + 12, 116, cy + 9)
+        blanket.cubicTo(122, cy + 16, 121, cy + 25, 116, cy + 29)
+        blanket.lineTo(26, cy + 29)
+        blanket.cubicTo(21, cy + 24, 22, cy + 16, 28, cy + 12)
+        p.setPen(QPen(QColor("#3F6E9A"), 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(QColor("#8EC3EE"))
+        p.drawPath(blanket)
+        p.save()
+        p.setClipPath(blanket)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#FFFFFF"))
+        for (dx_, dy_) in ((36, 20), (52, 15), (66, 23), (82, 16), (97, 22), (110, 16)):
+            p.drawEllipse(QPointF(dx_, cy + dy_), 2.3, 2.3)
+        p.restore()
+        p.save()                                    # the phone, tilted toward the face
+        p.translate(97, cy - 9)
+        p.rotate(14)
+        p.setPen(QPen(INK, 2.2))
+        p.setBrush(QColor("#2B2B33"))
+        p.drawRoundedRect(QRectF(-8, -14, 16, 28), 3.5, 3.5)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(("#9FE3FF", "#FFE08A", "#C9B6FF")[glow % 3]))
+        p.drawRoundedRect(QRectF(-8, -14, 3.2, 28), 1.5, 1.5)      # the lit screen, seen from the side
+        p.restore()
+    elif prop == "notes":
+        pad = QPainterPath(QPointF(80, cy + 1))     # notebook resting on the lap
+        pad.lineTo(108, cy - 3)
+        pad.lineTo(112, cy + 14)
+        pad.lineTo(84, cy + 18)
+        pad.closeSubpath()
+        p.setPen(QPen(INK, 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(QColor("#FFF6C9"))
+        p.drawPath(pad)
+        p.setPen(QPen(QColor("#E53935"), 1.3))
+        p.drawLine(QPointF(85.5, cy + 0.4), QPointF(89.5, cy + 17.2))
+        p.setPen(QPen(QColor("#7A8794"), 1.2, Qt.SolidLine, Qt.RoundCap))
+        n_lines = 4 if int(k) % 12 >= 7 else 2      # the page fills up while writing
+        for li in range(n_lines):
+            p.drawLine(QPointF(91 + li * 0.6, cy + 3 + li * 3.6), QPointF(105 + li * 0.6 - (li % 2) * 4, cy + 1 + li * 3.6))
+        p.setPen(QPen(INK, 1.3))
+        p.setBrush(QColor("#B0BEC5"))
+        for ri in range(5):                         # spiral rings along the top edge
+            p.drawEllipse(QPointF(83 + ri * 6.2, cy + 0.4 - ri * 0.9), 1.7, 2.3)
+    elif prop == "book":
+        by = cy - 10
+        for sgn, col in ((-1, "#FFFFFF"), (1, "#F4F1E8")):
+            page = QPainterPath(QPointF(95, by + 3))
+            page.lineTo(95 + sgn * 17, by - 3)
+            page.lineTo(95 + sgn * 17, by + 21)
+            page.lineTo(95, by + 27)
+            page.closeSubpath()
+            cover = QPainterPath(QPointF(95, by + 5))
+            cover.lineTo(95 + sgn * 19.5, by - 1)
+            cover.lineTo(95 + sgn * 19.5, by + 24)
+            cover.lineTo(95, by + 30)
+            cover.closeSubpath()
+            p.setPen(QPen(INK, 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.setBrush(QColor("#2E8B74"))
+            p.drawPath(cover)
+            p.setPen(QPen(INK, 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.setBrush(QColor(col))
+            p.drawPath(page)
+            p.setPen(QPen(QColor("#9AA0A6"), 1.1, Qt.SolidLine, Qt.RoundCap))
+            for li in range(4):
+                p.drawLine(QPointF(95 + sgn * 3.5, by + 8 + li * 4.3 - 1), QPointF(95 + sgn * 14, by + 4.5 + li * 4.3 - 1))
 
     # ---- front arm + drawstrings ---------------------------------------- #
     p.setPen(QPen(QColor("white"), 2, Qt.SolidLine, Qt.RoundCap))
     p.drawLine(QPointF(66 + bx, cy - 13), QPointF(66 + bx, cy - 4))
     _limb(p, QPointF(70 + bx, cy - 6), arm_front, len_f, hoodie, 5.5)
+    if prop == "notes" and hand_f is not None:      # pencil in the writing paw
+        tip = QPointF(hand_f[0] + 1, hand_f[1] + 8)
+        end = QPointF(hand_f[0] + 9, hand_f[1] - 12)
+        p.setPen(QPen(INK, 6.4, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(tip, end)
+        p.setPen(QPen(QColor("#FFC93C"), 3.6, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(tip.x() + 1.6, tip.y() - 4), end)
+        p.setPen(QPen(QColor("#F28B82"), 3.6, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(end.x() - 0.8, end.y() + 2), end)
 
     if mode == "sleep":
         _zz(p, zk, hoodie)
@@ -591,6 +820,54 @@ def _capy(hoodie: QColor, mode: str, t: float = 0.0, k: float = 0.0, zk: int = 0
             p.setPen(Qt.NoPen)
             p.setBrush(QColor("#FF8A00"))
             p.drawPath(ha)
+    elif fx == "bulb":                      # a bright idea
+        c_ = QPointF(108, hy - 30)
+        p.setPen(QPen(QColor("#FFB300"), 2.2, Qt.SolidLine, Qt.RoundCap))
+        for i in range(7):
+            a = math.pi * (0.95 + i * 0.35)
+            p.drawLine(QPointF(c_.x() + math.cos(a) * 12, c_.y() + math.sin(a) * 12),
+                       QPointF(c_.x() + math.cos(a) * 16.5, c_.y() + math.sin(a) * 16.5))
+        p.setPen(QPen(INK, 1.8))
+        p.setBrush(QColor("#9E9E9E"))
+        p.drawRoundedRect(QRectF(c_.x() - 3.8, c_.y() + 6, 7.6, 6.5), 1.5, 1.5)
+        p.setBrush(QColor("#FFE54A"))
+        p.drawEllipse(c_, 8.5, 8.5)
+    elif fx in ("notes", "hearts"):         # music drifting up from the headphones
+        col = QColor(note_col or "#FF8A00")
+        for i, (nx, sway) in enumerate(((18, 5), (108, -5), (30, -4))):
+            if mood in ("chill", "sad") and i == 2:
+                continue
+            ph_ = (t / (2 * math.pi) + i / 3) % 1.0
+            x = nx + math.sin(ph_ * 2 * math.pi) * sway
+            y = hy - 2 - ph_ * 34
+            sz = 0.75 + 0.35 * math.sin(ph_ * math.pi)
+            alpha = int(255 * min(1.0, 3.2 * (1 - ph_), 6 * ph_ + 0.2))
+            c2 = QColor(col)
+            c2.setAlpha(max(0, alpha))
+            white = QColor(255, 255, 255, max(0, alpha))
+            if fx == "hearts" and i != 1:
+                h_ = QPainterPath(QPointF(x, y + 6 * sz))
+                h_.cubicTo(x - 11 * sz, y - 2 * sz, x - 5 * sz, y - 9 * sz, x, y - 3 * sz)
+                h_.cubicTo(x + 5 * sz, y - 9 * sz, x + 11 * sz, y - 2 * sz, x, y + 6 * sz)
+                p.setPen(QPen(white, 3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                p.setBrush(c2)
+                p.drawPath(h_)
+                continue
+            note = QPainterPath()
+            note.addEllipse(QPointF(x, y), 4.6 * sz, 3.6 * sz)
+            stem = QPainterPath(QPointF(x + 4.2 * sz, y))
+            stem.lineTo(x + 4.2 * sz, y - 14 * sz)
+            stem.quadTo(x + 9 * sz, y - 13 * sz, x + 10 * sz, y - 7 * sz)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(white, 5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawPath(stem)
+            p.setPen(QPen(white, 3))
+            p.drawPath(note)
+            p.setPen(QPen(c2, 2.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawPath(stem)
+            p.setPen(Qt.NoPen)
+            p.setBrush(c2)
+            p.drawPath(note)
     elif fx == "stars":                     # stars circling the head
         for i in range(3):
             a = t + i * 2 * math.pi / 3
@@ -619,7 +896,15 @@ def capy_frames(hoodie_color: str) -> FrameSet:
         "angry": [_capy(h, "angry", t=i / 8 * tau) for i in range(8)],
         "tampo": [_capy(h, "tampo", t=0.0), _capy(h, "tampo", t=1.0), _capy(h, "tampo", t=2.0),
                   _capy(h, "tampo", t=0.5), _capy(h, "tampo", t=1.5, k=1), _capy(h, "tampo", t=2.0, k=1)],
+        # joining in with what you are doing (see activity.py)
+        "watch": [_capy(h, "watch", k=i) for i in range(8)],
+        "bed": [_capy(h, "bed", k=i) for i in range(12)],
+        "study": [_capy(h, "study", k=i) for i in range(12)],
+        "read": [_capy(h, "read", t=i / 12 * tau) for i in range(12)],
+        "read_hp": [_capy(h, "read_hp", t=i / 12 * tau) for i in range(12)],
     }
+    for mi, mood in enumerate(("happy", "hype", "chill", "sad", "love")):
+        extra[f"listen_{mood}"] = [_capy(h, "listen", t=i / 12 * tau, k=mi) for i in range(12)]
     return FrameSet(run, sleep, jump, extra)
 
 

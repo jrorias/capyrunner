@@ -33,6 +33,26 @@ To update later, download the newest release the same way and replace the old fo
 
 The sections below are for installing from the source code instead.
 
+## Primo joins in with what you are doing
+| You are… | Primo… |
+|---|---|
+| 🎧 listening to music | sits on the right side with headphones on, and his mood follows the song: happy, hype (head-banging), chill, sad (a tear) or in love (hearts) |
+| 📱 watching a video | gets cosy with a pillow, a blanket, headphones and his phone |
+| 🍿 watching a movie (fullscreen, mpv/VLC, Netflix…) | sits down with popcorn |
+| 📝 watching a tutorial, podcast or discussion | puts on glasses, sits up straight and takes notes |
+| 📖 reading a PDF / e-book | puts on glasses and reads a book (with headphones if music is on) |
+
+- A small line above him shows the mode icon and what is playing. Click him for the full title.
+- He guessed wrong? Right-click him → *When something plays* and pick the mode yourself.
+  Settings → *Take notes for* lets you list channels or words that always count as a tutorial/podcast.
+- Right-click him → control panel: play/pause, next, previous, and a volume slider (system output volume).
+- Speech bubbles stay on the screen and shrink to fit the text; the text size is in Settings.
+- Turn it all off in Settings → *Joins in*.
+
+Linux only for now: music and video need `playerctl` (works with Spotify, browsers, mpv, VLC…), volume uses
+`wpctl` or `pactl`, and the focused window (reading, video in front) is detected on Hyprland.
+The mood and the tutorial/podcast guess come from the words in the title, artist/channel and genre; nothing analyses the sound.
+
 ## Features
 - **Tasks** with due dates, reminders, notes per task, snooze 10 min
 - **Quick add** in plain language: `Call Jason in 30m`, `Standup @9:30`, `Report tomorrow @14`
@@ -71,7 +91,9 @@ Or use the ready-built `.zip` from the [latest release](https://github.com/jrori
 
 ## Using it
 - **Left-click** tray icon → open Tasks / Notes / Notifications. **Middle-click** → quick add.
-- **Right-click** tray or pet → menu (character, speed source, DND, settings, quit).
+- **Right-click the pet** → Primo's control panel: tasks, media and volume, how he joins in, the main switches,
+  and a **Close** button (Esc also closes it). `capyrunner --controls` opens it too, handy for a keyboard shortcut.
+- **Right-click the tray icon** → menu (character, speed source, DND, settings, quit).
 - **Click** the pet → Capy says hi / tells you what's pending. **Double-click** → open the panel.
 - The pet **never takes your typing**: you can click, pat and drag it, and the keyboard stays with the window you were
   working in. Scroll over it and it steps aside so the scroll reaches the page underneath (Hyprland).
@@ -106,13 +128,13 @@ capyrunner --notify "Deploy finished" "Siraj LMS updated"
 ./run-dev.sh            # runs from source with a local .venv
 ```
 Code layout: `capyrunner/characters.py` (drawn animations: Capy is `_capy()`), `app.py` (tray, pet, timers),
-`panel.py` (tasks/notes/notifications UI), `settings_dialog.py`, `webhook.py`, `quickadd.py`, `store.py`.
+`activity.py` (music / video / reading detection), `panel.py` (tasks/notes/notifications UI), `settings_dialog.py`, `webhook.py`, `quickadd.py`, `store.py`.
 
 ## GitHub builds
 `.github/workflows/build.yml` builds standalone Linux (`.tar.gz`) and Windows (`.zip`) apps with PyInstaller on every
 push to `main`. Push a tag to publish a Release:
 ```bash
-git tag v0.1.2 && git push origin v0.1.2
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 ## Roadmap ideas
