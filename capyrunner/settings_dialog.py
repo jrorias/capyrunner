@@ -107,9 +107,10 @@ class SettingsDialog(QDialog):
         f2.addRow("Speed follows", self.speed)
         self.show_tray = QCheckBox("Show in system tray / top bar", checked=self.s["show_tray"])
         self.show_pet = QCheckBox("Show floating pet on desktop", checked=self.s["show_pet"])
-        self.pet_passthrough = QCheckBox("Click-through pet: never blocks typing, clicking or scrolling",
-                                         checked=self.s.get("pet_passthrough", True))
-        self.pet_passthrough.setToolTip("The pet can't be clicked or dragged while this is on. Use the tray icon menu instead.")
+        self.pet_ghost = QCheckBox("Ghost mode: clicks go straight through the pet (it can't be touched)",
+                                   checked=self.s.get("pet_ghost", False))
+        self.pet_ghost.setToolTip("Off: you can click, drag and pat the pet, and it still never takes your typing or scrolling.\n"
+                                  "On: the pet ignores the mouse completely. Use the tray icon menu instead.")
         self.pet_roam = QCheckBox("Pet does laps around the screen (run, climb, sneak, nap)", checked=self.s.get("pet_roam", True))
         self.lap_falls = QCheckBox("Sometimes slips and falls while climbing", checked=self.s.get("lap_falls", True))
         self.lap_click_fall = QCheckBox("Clicking it on the rope knocks it off", checked=self.s.get("lap_click_fall", True))
@@ -124,7 +125,7 @@ class SettingsDialog(QDialog):
         self.autostart = QCheckBox("Start when I log in", checked=self.s["autostart"])
         for w in (self.show_tray, self.show_pet):
             f2.addRow(w)
-        f2.addRow(self.pet_passthrough)
+        f2.addRow(self.pet_ghost)
         f2.addRow(self.pet_roam)
         f2.addRow(self.lap_falls)
         f2.addRow(self.lap_click_fall)
@@ -229,7 +230,7 @@ class SettingsDialog(QDialog):
         s["show_tray"] = self.show_tray.isChecked()
         s["show_pet"] = self.show_pet.isChecked()
         s["pet_size"] = self.pet_size.value()
-        s["pet_passthrough"] = self.pet_passthrough.isChecked()
+        s["pet_ghost"] = self.pet_ghost.isChecked()
         s["pet_roam"] = self.pet_roam.isChecked()
         s["greetings"] = self.greetings.isChecked()
         s["max_fps"] = self.max_fps.value()

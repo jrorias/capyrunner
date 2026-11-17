@@ -73,8 +73,9 @@ Or use the ready-built `.zip` from the [latest release](https://github.com/jrori
 - **Left-click** tray icon → open Tasks / Notes / Notifications. **Middle-click** → quick add.
 - **Right-click** tray or pet → menu (character, speed source, DND, settings, quit).
 - **Click** the pet → Capy says hi / tells you what's pending. **Double-click** → open the panel.
-- **Click-through** (on by default): the pet never takes keyboard focus, clicks or scrolling, so it can run over
-  whatever you are working in. Untick *Click-through pet* in the tray menu when you want to click or drag it.
+- The pet **never takes your typing**: you can click, pat and drag it, and the keyboard stays with the window you were
+  working in. Scroll over it and it steps aside so the scroll reaches the page underneath (Hyprland).
+  Tick *Ghost mode* in the menu if you want clicks to pass straight through it as well.
 - **Drag** the pet to another height or screen; it keeps running on that line. Turn running off with
   right-click → *Run around the screen* (then it stays where you drop it).
 
@@ -111,7 +112,7 @@ Code layout: `capyrunner/characters.py` (drawn animations: Capy is `_capy()`), `
 `.github/workflows/build.yml` builds standalone Linux (`.tar.gz`) and Windows (`.zip`) apps with PyInstaller on every
 push to `main`. Push a tag to publish a Release:
 ```bash
-git tag v0.1.1 && git push origin v0.1.1
+git tag v0.1.2 && git push origin v0.1.2
 ```
 
 ## Roadmap ideas

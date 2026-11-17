@@ -52,6 +52,9 @@ class CapyRunner:
         self.pet.moved.connect(self._pet_moved)
         self.pet.clicked.connect(self._pet_clicked)
         self.pet.grabbed.connect(self._pet_grabbed)
+        self.pet.released.connect(lambda: QTimer.singleShot(120, self._hypr_give_back))
+        self.pet.missed.connect(self._pet_step_aside)
+        self.pet.wheeled.connect(self._pet_step_aside)
 
         self.rope = RopeWindow()
 
@@ -145,8 +148,9 @@ class CapyRunner:
         self.act_pet = QAction("Show floating pet", m, checkable=True)
         self.act_pet.toggled.connect(lambda on: self._set("show_pet", on))
         m.addAction(self.act_pet)
-        self.act_pass = QAction("Click-through pet (never blocks typing or scrolling)", m, checkable=True)
-        self.act_pass.toggled.connect(lambda on: self._set("pet_passthrough", on))
+        self.act_pass = QAction("Ghost mode (pet can't be touched)", m, checkable=True)
+        self.act_pass.toggled.connect(lambda on: self._set("pet_ghost", on))
+        m.aboutToHide.connect(lambda: QTimer.singleShot(150, self._hypr_give_back))
         m.addAction(self.act_pass)
         self.act_roam = QAction("Run around the screen", m, checkable=True)
         self.act_roam.toggled.connect(lambda on: self._set("pet_roam", on))
@@ -167,10 +171,10 @@ class CapyRunner:
             a.setChecked(a.data() == s["speed_source"])
         for a in self.char_group.actions():
             a.setChecked(a.data() == s["character"])
-        for act, key in ((self.act_pet, "show_pet"), (self.act_pass, "pet_passthrough"),
+        for act, key in ((self.act_pet, "show_pet"), (self.act_pass, "pet_ghost"),
                          (self.act_roam, "pet_roam"), (self.act_dnd, "dnd")):
             act.blockSignals(True)
-            act.setChecked(bool(s.get(key, True)))
+            act.setChecked(bool(s.get(key)))
             act.blockSignals(False)
 
     def _char_chosen(self, a: QAction):
@@ -205,7 +209,7 @@ class CapyRunner:
         self.tray.setVisible(bool(s["show_tray"]) and tray_ok)
         show_pet = bool(s["show_pet"]) or not self.tray.isVisible()   # never be invisible
         self.pet.set_pet_size(int(s["pet_size"]))
-        self.pet.set_passthrough(bool(s.get("pet_passthrough", True)))
+        self.pet.set_passthrough(bool(s.get("pet_ghost", False)))
         if show_pet:
             if first and s.get("pet_pos"):
                 self.pet.move(*s["pet_pos"])
@@ -391,31 +395,78 @@ class CapyRunner:
         if msg:
             self.pet.say(msg, 3000)
 
-    def _hypr_passthrough(self):
-        """Hyprland gives focus to whatever is under the mouse, so a pet running under the cursor would
-        swallow typing and scrolling. no_focus makes Hyprland skip the window for keyboard and mouse."""
-        if not (IS_LINUX and os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")):
-            return
-        on = bool(self.store.settings.get("pet_passthrough", True))
+    # ---- Hyprland: the pet must never take typing or scrolling away -------------------------- #
+    # Hyprland focuses whatever is under the mouse, so a pet running under the cursor would swallow
+    # the keyboard. no_follow_mouse stops that while keeping the pet clickable; no_focus (ghost mode,
+    # and the rope) makes Hyprland skip the window for keyboard and mouse altogether.
+    @staticmethod
+    def _on_hyprland() -> bool:
+        return IS_LINUX and bool(os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
+
+    @staticmethod
+    def _hyprctl(*args: str) -> str:
+        return subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=1).stdout
+
+    def _hypr_windows(self):
+        """(clients, pet addresses, rope addresses) as Hyprland sees them."""
+        clients = json.loads(self._hyprctl("clients", "-j"))
         pet_size = [self.pet.width(), self.pet.height()]
+        pets, ropes = [], []
+        for c in clients:
+            if c.get("pid") != os.getpid() or c.get("title") != "CapyRunner":
+                continue
+            size = c.get("size") or [0, 0]
+            if size[0] <= 2 * RopeWindow.WIDTH:
+                ropes.append(c["address"])
+            elif size == pet_size:
+                pets.append(c["address"])       # anything else is the tasks panel: leave it alone
+        return clients, pets, ropes
+
+    def _hypr_passthrough(self, step_aside: bool = False):
+        if not self._on_hyprland():
+            return
+        if not step_aside and time.time() < getattr(self, "_aside_until", 0.0):
+            return
+        ghost = bool(self.store.settings.get("pet_ghost", False)) or step_aside
         try:
-            out = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=1).stdout
-            cmds = []
-            for c in json.loads(out):
-                if c.get("pid") != os.getpid() or c.get("title") != "CapyRunner":
-                    continue
-                size = c.get("size") or [0, 0]
-                if size[0] <= 2 * RopeWindow.WIDTH:
-                    want = True                       # the rope is decoration only
-                elif size == pet_size:
-                    want = on
-                else:
-                    continue                          # the tasks panel must stay usable
-                cmds.append(f"dispatch setprop address:{c['address']} no_focus {int(want)}")
+            _, pets, ropes = self._hypr_windows()
+            cmds = [f"dispatch setprop address:{a} no_focus 1" for a in ropes]      # decoration only
+            for a in pets:
+                cmds.append(f"dispatch setprop address:{a} no_follow_mouse 1")
+                cmds.append(f"dispatch setprop address:{a} no_focus {int(ghost)}")
             if cmds:
-                subprocess.run(["hyprctl", "--batch", " ; ".join(cmds)], capture_output=True, timeout=1)
+                self._hyprctl("--batch", " ; ".join(cmds))
         except Exception:
             pass
+
+    def _hypr_give_back(self):
+        """After a click or drag, hand the keyboard back to the window that had it."""
+        if not self._on_hyprland():
+            return
+        try:
+            clients, pets, _ = self._hypr_windows()
+            active = json.loads(self._hyprctl("activewindow", "-j") or "{}")
+            if active.get("address") not in pets:
+                return
+            others = [c for c in clients if c.get("pid") != os.getpid() and c.get("mapped") and not c.get("hidden")
+                      and c.get("focusHistoryID", -1) >= 0]
+            if not others:
+                return
+            prev = min(others, key=lambda c: c["focusHistoryID"])
+            warps = json.loads(self._hyprctl("getoption", "cursor:no_warps", "-j") or "{}").get("int", 0)
+            self._hyprctl("--batch", f"keyword cursor:no_warps 1 ; dispatch focuswindow address:{prev['address']} ; "
+                                     f"keyword cursor:no_warps {int(warps)}")       # keep the mouse where it is
+        except Exception:
+            pass
+
+    def _pet_step_aside(self):
+        """Scrolled over the pet, or clicked the empty space around it: let the mouse through for a moment."""
+        if not self._on_hyprland():
+            return
+        self._aside_until = time.time() + 1.4
+        self._hypr_passthrough(step_aside=True)
+        self._hypr_give_back()
+        QTimer.singleShot(1500, self._hypr_passthrough)
 
     def _work_area(self, screen):
         """Screen area without panels. Under XWayland on Hyprland Qt does not see the bar, so ask Hyprland."""

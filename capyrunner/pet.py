@@ -12,11 +12,16 @@ class PetWindow(QWidget):
     moved = Signal(int, int)
     clicked = Signal()
     grabbed = Signal()            # user started dragging (pause roaming)
+    released = Signal()           # mouse button let go (hand keyboard focus back)
+    missed = Signal()             # pressed on the empty area around the sprite
+    wheeled = Signal()            # scrolled over the pet (let the scroll through)
 
     BUBBLE_H = 64
 
     def __init__(self, size: int = 96):
-        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+                         | Qt.WindowDoesNotAcceptFocus)      # touchable, but never takes the keyboard
+        self.setFocusPolicy(Qt.NoFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setWindowTitle("CapyRunner")
@@ -39,7 +44,6 @@ class PetWindow(QWidget):
         if on == bool(self.windowFlags() & Qt.WindowTransparentForInput):
             return
         self.setWindowFlag(Qt.WindowTransparentForInput, on)
-        self.setWindowFlag(Qt.WindowDoesNotAcceptFocus, on)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, on)
         self._press = None
         self._dragging = False
@@ -115,7 +119,27 @@ class PetWindow(QWidget):
                 p.drawPixmap(QRect(x, y, s, s), self._pix)
 
     # ---- mouse: click = say hi, drag = move, double-click = panel ----- #
+    def _hit(self, pos: QPoint) -> bool:
+        """True on the sprite or a visible speech bubble; the rest of the window is empty space."""
+        s, m = self.pet_size, 8
+        x = (self.width() - s) // 2
+        y = 0 if self.top_layout else self.BUBBLE_H
+        if QRect(x - m, y - m, s + 2 * m, s + 2 * m).contains(pos):
+            return True
+        if self._bubble:
+            by = self.pet_size if self.top_layout else 0
+            return QRect(0, by, self.width(), self.BUBBLE_H).contains(pos)
+        return False
+
+    def wheelEvent(self, e):
+        self.wheeled.emit()
+        e.ignore()
+
     def mousePressEvent(self, e):
+        if not self._hit(e.position().toPoint()):
+            self._press = None
+            self.missed.emit()
+            return
         if e.button() == Qt.LeftButton:
             self._down = e.globalPosition().toPoint()
             self._press = self._down - self.frameGeometry().topLeft()
@@ -143,6 +167,7 @@ class PetWindow(QWidget):
             self.clicked.emit()
         self._press = None
         self._dragging = False
+        self.released.emit()
 
     @staticmethod
     def app_is_wayland() -> bool:
