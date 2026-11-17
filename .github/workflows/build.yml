@@ -1,0 +1,65 @@
+name: Build
+
+# Builds ready-to-run apps for Linux and Windows.
+# - Every push to main: builds and attaches them as workflow artifacts (Actions tab).
+# - Pushing a tag like v0.1.0: also creates a GitHub Release with the files.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: CapyRunner-linux-x86_64.tar.gz
+          - os: windows-latest
+            artifact: CapyRunner-windows-x64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pyinstaller pillow
+
+      - name: Windows icon
+        if: runner.os == 'Windows'
+        run: python -c "from PIL import Image; Image.open('capyrunner/assets/capyrunner.png').save('packaging/capyrunner.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --noconfirm --windowed --name CapyRunner \
+            --add-data "capyrunner/assets:capyrunner/assets" packaging/entry.py
+          cp capyrunner/assets/capyrunner.png dist/CapyRunner/
+          tar -czf ${{ matrix.artifact }} -C dist CapyRunner
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --noconfirm --windowed --name CapyRunner --icon packaging/capyrunner.ico `
+            --add-data "capyrunner/assets;capyrunner/assets" packaging/entry.py
+          Compress-Archive -Path dist/CapyRunner/* -DestinationPath ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}
