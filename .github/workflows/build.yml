@@ -35,7 +35,7 @@ jobs:
           - os: windows-latest
             artifact: CapyRunner-windows-x64.zip
             installer: CapyRunner-Setup-x64.exe
-          - os: macos-14
+          - os: macos-latest
             artifact: CapyRunner-macos-arm64.zip
     runs-on: ${{ matrix.os }}
     steps:
@@ -123,6 +123,31 @@ jobs:
           & $iscc /Qp "/DAppVersion=$env:CAPY_VERSION" packaging\capyrunner.iss
           Move-Item dist/${{ matrix.installer }} ${{ matrix.installer }}
           "{0:N1} MB installer" -f ((Get-Item ${{ matrix.installer }}).Length / 1MB)
+
+      - name: Install test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # install silently like a user would, start the installed app, check it keeps running, then uninstall
+          $p = Start-Process .\${{ matrix.installer }} -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/TASKS=""""" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer failed (exit code $($p.ExitCode))" }
+          $exe = "$env:LOCALAPPDATA\Programs\CapyRunner\CapyRunner.exe"
+          if (-not (Test-Path $exe)) { throw "CapyRunner.exe was not installed" }
+          Get-Process CapyRunner -ErrorAction SilentlyContinue | Stop-Process -Force
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $app = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 12
+          if ($app.HasExited) { throw "Installed CapyRunner stopped early (exit code $($app.ExitCode))" }
+          $mb = [math]::Round((Get-Process -Id $app.Id).WorkingSet64 / 1MB)
+          "Installed app running, memory: $mb MB"
+          Stop-Process -Id $app.Id -Force
+          $err = "$env:LOCALAPPDATA\CapyRunner\error.log"
+          if (Test-Path $err) { Get-Content $err; throw "errors were logged" }
+          $un = Start-Process "$env:LOCALAPPDATA\Programs\CapyRunner\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait -PassThru
+          if ($un.ExitCode -ne 0) { throw "Uninstaller failed (exit code $($un.ExitCode))" }
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { throw "Uninstall left CapyRunner.exe behind" }
+          "Install, start and uninstall all fine"
 
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'

@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import date, datetime
 
@@ -2244,6 +2245,27 @@ def _single_instance(name: str, message: bytes = b"show") -> QLocalServer | None
     return server
 
 
+def _log_errors():
+    """Something unexpected goes wrong: write it to error.log in the data folder (Windows apps have no console),
+    and keep running. The log is cut short so it never grows big."""
+    import traceback
+    from .store import config_dir
+
+    def hook(kind, value, tb):
+        try:
+            path = os.path.join(config_dir(), "error.log")
+            if os.path.exists(path) and os.path.getsize(path) > 200_000:
+                os.replace(path, path + ".old")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} CapyRunner {__version__} ---\n")
+                f.write("".join(traceback.format_exception(kind, value, tb)))
+        except Exception:
+            pass
+
+    sys.excepthook = hook
+    threading.excepthook = lambda a: hook(a.exc_type, a.exc_value, a.exc_traceback)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="capyrunner", description="Running mascot for tasks & notifications")
     ap.add_argument("--version", action="version", version=__version__)
@@ -2256,6 +2278,7 @@ def main(argv=None):
     ap.add_argument("--dance", action="store_true", help="start / stop a dance showdown with Jeo in the running app")
     ap.add_argument("--touch", action="store_true", help="start / stop the Touch by Touch dance (Jeo's solo, then the duet)")
     args, qt_args = ap.parse_known_args(argv)
+    _log_errors()
 
     if args.notify:
         import json

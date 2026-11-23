@@ -303,7 +303,7 @@ capyrunner --notify "Deploy finished" "Siraj LMS updated"
 ```
 
 ## Data
-`~/.config/CapyRunner/` on Linux, `%APPDATA%\CapyRunner\` on Windows, `~/Library/Preferences/CapyRunner/` on macOS. Contains `settings.json` and `data.json` (tasks, notes, notifications).
+`~/.config/CapyRunner/` on Linux, `%LOCALAPPDATA%\CapyRunner\` on Windows (if something goes wrong, `error.log` there says what), `~/Library/Preferences/CapyRunner/` on macOS. Contains `settings.json` and `data.json` (tasks, notes, notifications).
 
 ## Development
 ```bash
@@ -320,7 +320,7 @@ Code layout: `capyrunner/characters.py` (drawn animations: Capy is `_capy()`), `
 macOS (`.zip` with `CapyRunner.app`) apps with PyInstaller and Inno Setup on every push to `main`, and test-starts the
 Windows and macOS builds. Push a tag to publish a Release:
 ```bash
-git tag v0.5.0 && git push origin v0.5.0
+git tag v0.5.1 && git push origin v0.5.1
 ```
 
 ## Roadmap ideas

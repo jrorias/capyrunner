@@ -28,7 +28,8 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0
+; Windows 10 version 1809 or newer (Qt 6 needs it), and every Windows 11
+MinVersion=10.0.17763
 WizardStyle=modern
 CloseApplications=force
 RestartApplications=no
