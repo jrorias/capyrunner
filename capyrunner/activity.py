@@ -1,7 +1,10 @@
 """What is the user doing right now? Listening to music, watching a video, or reading.
 
-Linux only for now: media comes from MPRIS (via `playerctl`), the focused window from Hyprland
-(`hyprctl`). Everything is best effort: when a tool is missing the answer is simply "nothing".
+- Linux: media from MPRIS (via `playerctl`), the focused window from Hyprland (`hyprctl`).
+- Windows 10/11: media from the system media controls (the same list as the volume pop-up: Spotify, browsers,
+  the Media Player…) through WinRT, else from the Spotify window title; the window in front through Win32.
+- macOS: Spotify and Apple Music through AppleScript (only when they are running), the front app via lsappinfo.
+Everything is best effort: when something is missing the answer is simply "nothing".
 """
 from __future__ import annotations
 
@@ -14,7 +17,8 @@ from dataclasses import dataclass
 
 MUSIC_PLAYERS = ("spotify", "spotifyd", "ncspot", "spotube", "rhythmbox", "mpd", "mopidy", "strawberry", "clementine",
                  "elisa", "amberol", "lollypop", "cmus", "audacious", "tidal", "deezer", "cider", "musikcube",
-                 "quodlibet", "gnome-music", "shortwave", "tauon", "feishin", "supersonic", "psst", "youtube-music")
+                 "quodlibet", "gnome-music", "shortwave", "tauon", "feishin", "supersonic", "psst", "youtube-music",
+                 "media player", "apple music", "itunes", "amazon music", "musicbee", "foobar2000", "winamp", "aimp")
 VIDEO_PLAYERS = ("mpv", "vlc", "celluloid", "totem", "haruna", "kodi", "smplayer", "showtime", "clapper", "jellyfin",
                  "plex", "stremio", "freetube")
 BROWSERS = ("chromium", "chrome", "firefox", "brave", "edge", "vivaldi", "opera", "zen", "librewolf", "floorp",
@@ -91,7 +95,13 @@ def _run(*cmd: str) -> str:
 
 
 def _active_window() -> tuple[str, str, bool]:
-    """(class, title, fullscreen) of the focused window, lower-cased. Hyprland only."""
+    """(class / program, title, fullscreen) of the focused window, lower-cased."""
+    if sys.platform == "win32":
+        from . import winwatch
+        prog, title = winwatch.foreground()
+        return prog, title, winwatch.fullscreen()
+    if sys.platform == "darwin":
+        return _mac_front(), "", False
     if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         return "", "", False
     try:
@@ -101,7 +111,94 @@ def _active_window() -> tuple[str, str, bool]:
     return str(w.get("class", "")).lower(), str(w.get("title", "")).lower(), bool(w.get("fullscreen"))
 
 
+# --- Windows: the system media controls (GlobalSystemMediaTransportControls) --- #
+_WIN_APPS = {"308046b0af4a39cb": "firefox", "msedge": "edge", "zunemusic": "media player", "microsoft.zunemusic": "media player"}
+
+
+async def _gsmtc() -> list[dict]:
+    from winrt.windows.media.control import (GlobalSystemMediaTransportControlsSessionManager as Manager,
+                                             GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status)
+    out = []
+    mgr = await Manager.request_async()
+    for ses in mgr.get_sessions():
+        info = ses.get_playback_info()
+        if info is None or info.playback_status != Status.PLAYING:
+            continue
+        props = await ses.try_get_media_properties_async()
+        app = str(ses.source_app_user_model_id or "").lower()
+        app = next((v for k, v in _WIN_APPS.items() if k in app), app)
+        genres = " ".join(str(g) for g in (props.genres or [])) if props else ""
+        out.append({"player": app, "status": "Playing", "title": (props.title if props else "") or "",
+                    "artist": (props.artist if props else "") or "", "album": (props.album_title if props else "") or "",
+                    "url": "", "genre": genres})
+    return out
+
+
+_winrt = {"ok": True, "busy": False, "last": []}
+
+
+def _winrt_refresh() -> None:
+    """Runs in its own thread: WinRT wants its own COM apartment (Qt's main thread has another one),
+    and the answer can take a moment, which must never make Primo stutter."""
+    import asyncio
+    try:
+        _winrt["last"] = asyncio.run(asyncio.wait_for(_gsmtc(), 2.0))
+    except ImportError:
+        _winrt["ok"] = False                      # not installed: use window titles from now on
+    except Exception:
+        _winrt["last"] = []
+    finally:
+        _winrt["busy"] = False
+
+
+def _win_players() -> list[dict]:
+    if _winrt["ok"]:
+        if not _winrt["busy"]:                    # ask again in the background; answer with the last result
+            import threading
+            _winrt["busy"] = True
+            threading.Thread(target=_winrt_refresh, daemon=True, name="capy-media").start()
+        return list(_winrt["last"])
+    from . import winwatch                         # Spotify shows "Artist - Song" as its title while playing
+    out = []
+    for prog, title in winwatch.windows():
+        if prog == "spotify.exe" and " - " in title and not title.startswith("spotify"):
+            artist, _, song = title.partition(" - ")
+            out.append({"player": "spotify", "status": "Playing", "title": song, "artist": artist,
+                        "album": "", "url": "", "genre": ""})
+    return out
+
+
+# --- macOS: Spotify and Apple Music through AppleScript --------------------- #
+def _mac_front() -> str:
+    asn = _run("lsappinfo", "front").strip()
+    line = _run("lsappinfo", "info", "-only", "name", asn) if asn else ""
+    return line.split("=", 1)[1].strip().strip('"').lower() if "=" in line else ""
+
+
+def _mac_players() -> list[dict]:
+    try:
+        import psutil
+        running = {p.info["name"] for p in psutil.process_iter(["name"])}
+    except Exception:
+        return []
+    out = []
+    for app, proc in (("Spotify", "Spotify"), ("Music", "Music")):
+        if proc not in running:                      # never start an app just by asking it
+            continue
+        script = (f'tell application "{app}" to if player state is playing then '
+                  'return (name of current track) & tab & (artist of current track) & tab & (album of current track)')
+        parts = _run("osascript", "-e", script).rstrip("\n").split("\t")
+        if len(parts) == 3 and parts[0]:
+            out.append({"player": app.lower() if app == "Spotify" else "apple music", "status": "Playing",
+                        "title": parts[0], "artist": parts[1], "album": parts[2], "url": "", "genre": ""})
+    return out
+
+
 def _players() -> list[dict]:
+    if sys.platform == "win32":
+        return _win_players()
+    if sys.platform == "darwin":
+        return _mac_players()
     if not shutil.which("playerctl"):
         return []
     fmt = "\t".join("{{%s}}" % f for f in ("playerName", "status", "title", "artist", "album", "xesam:url", "xesam:genre"))
@@ -140,8 +237,6 @@ def _media_kind(p: dict, wclass: str, wtitle: str, fullscreen: bool, study_words
 
 
 def detect(extra_study_words=()) -> Activity:
-    if not sys.platform.startswith("linux"):
-        return Activity()
     study_words = STUDY_WORDS + tuple(str(w).lower() for w in extra_study_words if str(w).strip())
     wclass, wtitle, fullscreen = _active_window()
     reading = _has(wclass, READER_APPS) or _has(wtitle, READ_WORDS)
@@ -164,6 +259,16 @@ def detect(extra_study_words=()) -> Activity:
 # --------------------------------------------------------------------------- #
 def media(cmd: str) -> None:
     """cmd: play-pause | next | previous"""
+    if sys.platform == "win32":
+        from . import winwatch
+        winwatch.media_key(cmd)
+        return
+    if sys.platform == "darwin":
+        for app in ("Spotify", "Music"):
+            verb = {"play-pause": "playpause", "next": "next track", "previous": "previous track"}.get(cmd, "")
+            if verb:
+                _run("osascript", "-e", f'if application "{app}" is running then tell application "{app}" to {verb}')
+        return
     if shutil.which("playerctl"):
         _run("playerctl", cmd)
 

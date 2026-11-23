@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 *.spec
 packaging/*.ico
+packaging/version_info.txt

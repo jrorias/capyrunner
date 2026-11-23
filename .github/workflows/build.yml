@@ -1,8 +1,11 @@
 name: Build
 
-# Builds ready-to-run apps for Linux and Windows.
+# Builds ready-to-run apps for Linux, Windows and macOS (Apple silicon). Developed by Devjr.
 # - Every push to main: builds and attaches them as workflow artifacts (Actions tab).
-# - Pushing a tag like v0.1.0: also creates a GitHub Release with the files.
+# - Pushing a tag like v0.4.0: also creates a GitHub Release with the files.
+#
+# Kept small: only the Qt parts CapyRunner uses (PySide6-Essentials: Core, Gui, Widgets, Network),
+# and the bundled extras it never touches (software OpenGL, PDF, Qt translations, Quick/QML) are removed.
 on:
   push:
     branches: [main]
@@ -11,6 +14,15 @@ on:
 
 permissions:
   contents: write
+
+env:
+  EXCLUDES: >-
+    --exclude-module tkinter --exclude-module unittest --exclude-module pydoc --exclude-module test
+    --exclude-module PySide6.QtQml --exclude-module PySide6.QtQuick --exclude-module PySide6.QtQuickWidgets
+    --exclude-module PySide6.QtPdf --exclude-module PySide6.QtSql --exclude-module PySide6.QtTest
+    --exclude-module PySide6.QtOpenGL --exclude-module PySide6.QtOpenGLWidgets --exclude-module PySide6.QtXml
+    --exclude-module PySide6.QtDBus --exclude-module PySide6.QtConcurrent --exclude-module PySide6.QtPrintSupport
+    --exclude-module PySide6.QtDesigner --exclude-module PySide6.QtUiTools --exclude-module PySide6.QtHelp
 
 jobs:
   build:
@@ -22,6 +34,9 @@ jobs:
             artifact: CapyRunner-linux-x86_64.tar.gz
           - os: windows-latest
             artifact: CapyRunner-windows-x64.zip
+            installer: CapyRunner-Setup-x64.exe
+          - os: macos-14
+            artifact: CapyRunner-macos-arm64.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -32,34 +47,105 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install . pyinstaller pillow
+          pip install "PySide6-Essentials>=6.5" psutil pyinstaller pillow
+          pip install --no-deps .
 
-      - name: Windows icon
+      - name: Install (Windows media detection)
         if: runner.os == 'Windows'
-        run: python -c "from PIL import Image; Image.open('capyrunner/assets/capyrunner.png').save('packaging/capyrunner.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
+        run: pip install winrt-runtime winrt-Windows.Media.Control winrt-Windows.Foundation winrt-Windows.Foundation.Collections
+
+      - name: Version
+        shell: bash
+        run: echo "CAPY_VERSION=$(python -c 'import capyrunner; print(capyrunner.__version__)')" >> "$GITHUB_ENV"
+
+      - name: Windows icon and file details
+        if: runner.os == 'Windows'
+        run: |
+          python -c "from PIL import Image; Image.open('capyrunner/assets/capyrunner.png').save('packaging/capyrunner.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(256,256)])"
+          python packaging/version_info.py | Out-File -Encoding utf8 packaging/version_info.txt
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
-          pyinstaller --noconfirm --windowed --name CapyRunner \
+          pyinstaller --noconfirm --windowed --name CapyRunner $EXCLUDES \
             --add-data "capyrunner/assets:capyrunner/assets" packaging/entry.py
+          Q=dist/CapyRunner/_internal/PySide6/Qt
+          rm -rf $Q/translations $Q/plugins/imageformats/libqpdf.so $Q/lib/libQt6Pdf.so* \
+                 $Q/lib/libQt6Quick*.so* $Q/lib/libQt6Qml*.so* $Q/lib/libQt6VirtualKeyboard*.so*
           cp capyrunner/assets/capyrunner.png dist/CapyRunner/
           tar -czf ${{ matrix.artifact }} -C dist CapyRunner
+          du -sh dist/CapyRunner ${{ matrix.artifact }}
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          pyinstaller --noconfirm --windowed --name CapyRunner --icon packaging/capyrunner.ico `
+          $ex = $env:EXCLUDES -split ' '
+          pyinstaller --noconfirm --windowed --name CapyRunner --icon packaging/capyrunner.ico @ex `
+            --version-file packaging/version_info.txt --collect-submodules winrt `
             --add-data "capyrunner/assets;capyrunner/assets" packaging/entry.py
-          Compress-Archive -Path dist/CapyRunner/* -DestinationPath ${{ matrix.artifact }}
+          $q = "dist/CapyRunner/_internal/PySide6"
+          $junk = @("$q/opengl32sw.dll", "$q/translations", "$q/plugins/imageformats/qpdf.dll", "$q/Qt6Pdf.dll",
+                    "$q/Qt6Quick.dll", "$q/Qt6Qml.dll", "$q/Qt6QmlModels.dll", "$q/Qt6QmlMeta.dll",
+                    "$q/Qt6QmlWorkerScript.dll", "$q/Qt6VirtualKeyboard.dll", "$q/plugins/platforminputcontexts")
+          foreach ($j in $junk) { if (Test-Path $j) { Remove-Item -Recurse -Force $j } }
+          Compress-Archive -Path dist/CapyRunner -DestinationPath ${{ matrix.artifact }}
+          "{0:N1} MB zip" -f ((Get-Item ${{ matrix.artifact }}).Length / 1MB)
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --windowed --name CapyRunner $EXCLUDES \
+            --icon capyrunner/assets/capyrunner.png --osx-bundle-identifier com.devjr.capyrunner \
+            --add-data "capyrunner/assets:capyrunner/assets" packaging/entry.py
+          find dist/CapyRunner.app -path "*PySide6/Qt/translations" -prune -exec rm -rf {} + || true
+          find dist/CapyRunner.app \( -name "QtPdf*" -o -name "QtQuick*" -o -name "QtQml*" -o -name "QtVirtualKeyboard*" \) \
+            -prune -exec rm -rf {} + || true
+          codesign --force --deep --sign - dist/CapyRunner.app      # ad-hoc signature so Apple silicon runs it
+          ditto -c -k --keepParent dist/CapyRunner.app ${{ matrix.artifact }}
+          du -sh dist/CapyRunner.app ${{ matrix.artifact }}
+
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          QT_QPA_PLATFORM=offscreen dist/CapyRunner.app/Contents/MacOS/CapyRunner &
+          pid=$!
+          sleep 10
+          kill -0 $pid || { echo "CapyRunner stopped early"; exit 1; }
+          kill $pid
+
+      - name: Installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          & $iscc /Qp "/DAppVersion=$env:CAPY_VERSION" packaging\capyrunner.iss
+          Move-Item dist/${{ matrix.installer }} ${{ matrix.installer }}
+          "{0:N1} MB installer" -f ((Get-Item ${{ matrix.installer }}).Length / 1MB)
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # start it for real (offscreen) and make sure it is still running after a while
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process dist/CapyRunner/CapyRunner.exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { throw "CapyRunner.exe stopped early (exit code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.installer }}
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact }}
+          files: |
+            ${{ matrix.artifact }}
+            ${{ matrix.installer }}

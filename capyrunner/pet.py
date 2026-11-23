@@ -1,7 +1,7 @@
 """Floating desktop pet: a small always-on-top window you can drag anywhere."""
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
@@ -23,6 +23,7 @@ class PetWindow(QWidget):
                          | Qt.WindowDoesNotAcceptFocus)      # touchable, but never takes the keyboard
         self.setFocusPolicy(Qt.NoFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)   # macOS hides tool windows when another app is in front
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setWindowTitle("CapyRunner")
         self._pix: QPixmap | None = None
@@ -39,7 +40,18 @@ class PetWindow(QWidget):
         self._press: QPoint | None = None
         self._down = QPoint()
         self._dragging = False
+        self.width_pct = 100          # sprite width as a % of its height (100 = as drawn)
+        self.bubble_bg, self.bubble_fg, self.bubble_border = QColor("#FFFFFF"), QColor("#1B1B1B"), QColor("#3A2414")
         self.set_pet_size(size)
+
+    @property
+    def sprite_w(self) -> int:
+        """How wide the sprite is drawn (the height is pet_size)."""
+        return max(24, round(self.pet_size * self.width_pct / 100))
+
+    def set_bubble_colors(self, bg: str, fg: str, border: str) -> None:
+        self.bubble_bg, self.bubble_fg, self.bubble_border = QColor(bg), QColor(fg), QColor(border)
+        self.update()
 
     def set_passthrough(self, on: bool) -> None:
         """Click-through: the pet never takes focus, clicks or scroll, so whatever is under it keeps working.
@@ -51,9 +63,11 @@ class PetWindow(QWidget):
         self._press = None
         self._dragging = False
 
-    def set_pet_size(self, size: int) -> None:
+    def set_pet_size(self, size: int, width_pct: int | None = None) -> None:
         self.pet_size = max(32, min(320, size))
-        w = max(self.pet_size + 40, 240)
+        if width_pct is not None:
+            self.width_pct = max(50, min(200, int(width_pct)))
+        w = max(self.sprite_w + 40, 240)
         self.setFixedSize(w, self.pet_size + self.BUBBLE_H)
         self.update()
 
@@ -134,31 +148,33 @@ class PetWindow(QWidget):
                 path.moveTo(px - 7, r.bottom())
                 path.lineTo(px, r.bottom() + 8)
                 path.lineTo(px + 7, r.bottom())
-            p.setPen(QPen(QColor("#3A2414"), 1.6))
-            p.setBrush(QColor(255, 255, 255, 215 if small else 250))
+            p.setPen(QPen(self.bubble_border, 1.6))
+            bg = QColor(self.bubble_bg)
+            bg.setAlpha(215 if small else 250)
+            p.setBrush(bg)
             p.drawPath(path.simplified())
-            p.setPen(QColor("#1B1B1B"))
+            p.setPen(self.bubble_fg)
             p.drawText(r.adjusted(8, 3, -8, -3), flags, text)
         if self._pix:
-            s = self.pet_size
-            x = (self.width() - s) // 2
+            s, sw = self.pet_size, self.sprite_w
+            x = (self.width() - sw) // 2
             y = 0 if self.top_layout else self.BUBBLE_H - self._hop
             if self._spin:
                 p.save()
-                p.translate(x + s / 2, y + s / 2)
+                p.translate(x + sw / 2, y + s / 2)
                 p.rotate(self._spin)
-                p.drawPixmap(QRect(-s // 2, -s // 2, s, s), self._pix)
+                p.drawPixmap(QRect(-sw // 2, -s // 2, sw, s), self._pix)
                 p.restore()
             else:
-                p.drawPixmap(QRect(x, y, s, s), self._pix)
+                p.drawPixmap(QRect(x, y, sw, s), self._pix)
 
     # ---- mouse: click = say hi, drag = move, double-click = panel ----- #
     def _hit(self, pos: QPoint) -> bool:
         """True on the sprite or a visible speech bubble; the rest of the window is empty space."""
-        s, m = self.pet_size, 8
-        x = (self.width() - s) // 2
+        s, sw, m = self.pet_size, self.sprite_w, 8
+        x = (self.width() - sw) // 2
         y = 0 if self.top_layout else self.BUBBLE_H
-        if QRect(x - m, y - m, s + 2 * m, s + 2 * m).contains(pos):
+        if QRect(x - m, y - m, sw + 2 * m, s + 2 * m).contains(pos):
             return True
         if self._bubble:
             by = self.pet_size if self.top_layout else 0
@@ -219,18 +235,26 @@ class PetWindow(QWidget):
 
 class RopeWindow(QWidget):
     """Thin click-through strip down a screen edge: the rope the pet climbs."""
-    WIDTH = 12
+    WIDTH = 30
+    FLAGS = ("#F0527A", "#FFD54A", "#29A3DA", "#58B368", "#FF8A00")
 
     def __init__(self):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
                          | Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)   # macOS hides tool windows when another app is in front
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setWindowTitle("CapyRunner")
         self.active = False
         self.color = QColor("#C79A5B")
+        self.style_ = "rope"              # rope | vine | bunting | none (see themes.py)
         self.resize(self.WIDTH, 100)
+
+    def set_style(self, style: str) -> None:
+        if style != self.style_:
+            self.style_ = style
+            self.update()
 
     def set_color(self, color: str) -> None:
         c = QColor(color)
@@ -248,10 +272,13 @@ class RopeWindow(QWidget):
         p.setCompositionMode(QPainter.CompositionMode_Source)
         p.fillRect(self.rect(), Qt.transparent)
         p.setCompositionMode(QPainter.CompositionMode_SourceOver)
-        if not self.active:
+        if not self.active or self.style_ == "none":
             return
         p.setRenderHint(QPainter.Antialiasing)
         cx, h = self.width() / 2, self.height()
+        if self.style_ in ("vine", "bunting"):
+            self._paint_fancy(p, cx, h)
+            return
         pen = p.pen()
         pen.setCapStyle(Qt.RoundCap)
         dark = self.color.darker(190)
@@ -262,3 +289,31 @@ class RopeWindow(QWidget):
         pen.setColor(dark); pen.setWidthF(1.2); p.setPen(pen)
         for y in range(2, h, 7):          # twist marks
             p.drawLine(int(cx - 2), y + 3, int(cx + 2), y)
+
+    def _paint_fancy(self, p: QPainter, cx: float, h: int):
+        """A jungle vine with leaves, or a string of fiesta flags."""
+        vine = self.style_ == "vine"
+        dark = self.color.darker(190)
+        pen = QPen(dark, 5.0 if vine else 2.6, Qt.SolidLine, Qt.RoundCap)
+        p.setPen(pen)
+        p.drawLine(QPointF(cx, 0), QPointF(cx, h))
+        pen.setColor(self.color)
+        pen.setWidthF(3.0 if vine else 1.4)
+        p.setPen(pen)
+        p.drawLine(QPointF(cx, 0), QPointF(cx, h))
+        step = 38 if vine else 30
+        for i, y in enumerate(range(12, h - 14, step)):
+            side = 1 if i % 2 else -1
+            shape = QPainterPath(QPointF(cx, y))
+            if vine:
+                shape.quadTo(cx + side * 11, y - 9, cx + side * 13, y + 3)
+                shape.quadTo(cx + side * 6, y + 8, cx, y)
+                p.setPen(QPen(dark, 1.4))
+                p.setBrush(self.color.lighter(125))
+            else:
+                shape.lineTo(cx + side * 12, y + 7)
+                shape.lineTo(cx, y + 14)
+                shape.closeSubpath()
+                p.setPen(QPen(QColor("#3A2414"), 1.2))
+                p.setBrush(QColor(self.FLAGS[i % len(self.FLAGS)]))
+            p.drawPath(shape)

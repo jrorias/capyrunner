@@ -63,7 +63,7 @@ say "Creating virtual environment in $VENV"
 mkdir -p "$APP_DIR"
 python3 -m venv "$VENV"
 "$VENV/bin/python" -m pip install -q --upgrade pip
-say "Installing CapyRunner and PySide6 (first time downloads ~100 MB)…"
+say "Installing CapyRunner and PySide6-Essentials (first time downloads ~60 MB)…"
 "$VENV/bin/python" -m pip install -q --upgrade "$SRC"
 ok "Python packages installed"
 
