@@ -320,7 +320,7 @@ Code layout: `capyrunner/characters.py` (drawn animations: Capy is `_capy()`), `
 macOS (`.zip` with `CapyRunner.app`) apps with PyInstaller and Inno Setup on every push to `main`, and test-starts the
 Windows and macOS builds. Push a tag to publish a Release:
 ```bash
-git tag v0.5.1 && git push origin v0.5.1
+git tag v0.5.2 && git push origin v0.5.2
 ```
 
 ## Roadmap ideas

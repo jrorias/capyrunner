@@ -129,11 +129,14 @@ jobs:
         shell: pwsh
         run: |
           # install silently like a user would, start the installed app, check it keeps running, then uninstall
-          $p = Start-Process .\${{ matrix.installer }} -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/TASKS=""""" -Wait -PassThru
+          # (wait for the setup only: -Wait would also wait for the CapyRunner it starts afterwards, forever)
+          $p = Start-Process .\${{ matrix.installer }} -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/TASKS=""""" -PassThru
+          if (-not $p.WaitForExit(300000)) { throw "Installer did not finish within 5 minutes" }
           if ($p.ExitCode -ne 0) { throw "Installer failed (exit code $($p.ExitCode))" }
           $exe = "$env:LOCALAPPDATA\Programs\CapyRunner\CapyRunner.exe"
           if (-not (Test-Path $exe)) { throw "CapyRunner.exe was not installed" }
-          Get-Process CapyRunner -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 3
+          Get-Process CapyRunner -ErrorAction SilentlyContinue | Stop-Process -Force   # the one the setup started
           $env:QT_QPA_PLATFORM = "offscreen"
           $app = Start-Process $exe -PassThru
           Start-Sleep -Seconds 12
@@ -141,9 +144,12 @@ jobs:
           $mb = [math]::Round((Get-Process -Id $app.Id).WorkingSet64 / 1MB)
           "Installed app running, memory: $mb MB"
           Stop-Process -Id $app.Id -Force
+          Start-Sleep -Seconds 2
           $err = "$env:LOCALAPPDATA\CapyRunner\error.log"
           if (Test-Path $err) { Get-Content $err; throw "errors were logged" }
-          $un = Start-Process "$env:LOCALAPPDATA\Programs\CapyRunner\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait -PassThru
+          $un = Start-Process "$env:LOCALAPPDATA\Programs\CapyRunner\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -PassThru
+          if (-not $un.WaitForExit(120000)) { throw "Uninstaller did not finish within 2 minutes" }
+          Start-Sleep -Seconds 5        # the uninstaller finishes in a copy of itself
           if ($un.ExitCode -ne 0) { throw "Uninstaller failed (exit code $($un.ExitCode))" }
           Start-Sleep -Seconds 3
           if (Test-Path $exe) { throw "Uninstall left CapyRunner.exe behind" }
