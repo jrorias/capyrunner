@@ -15,13 +15,14 @@ import time
 from datetime import date, datetime
 
 import psutil
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QPainter, QPixmap, QTransform
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QInputDialog, QMenu,
                                QMessageBox, QSystemTrayIcon)
 
-from . import __version__, activity, autostart, avatars, dance, meeting, quickadd, rides, themes, uitheme, updater, wellbeing, workmode
+from . import (__version__, activity, autostart, avatars, dance, meeting, model3d, quickadd, rides, themes, uitheme, updater,
+               voice, wellbeing, workmode)
 from .controls import ControlPanel
 from .characters import (BASE, BUILTIN, ROPE_X, FrameSet, desk_frames, friend_frames, load_frames, move_frames, office_frames,
                          friend_rider_frames, rider_frames,
@@ -33,6 +34,11 @@ from .store import Store
 from .webhook import WebhookBridge, WebhookServer
 
 IS_LINUX = sys.platform.startswith("linux")
+
+
+class _Ready3D(QObject):
+    """Carries 'the 3D frames are drawn' from the drawing thread back to the GUI thread."""
+    ready = Signal(str, str)          # who, look key
 SEAT_SIDES = workmode.SEAT_SIDES
 
 
@@ -60,6 +66,12 @@ class CapyRunner:
         self.pet.released.connect(lambda: QTimer.singleShot(120, self._hypr_give_back))
         self.pet.missed.connect(self._pet_step_aside)
         self.pet.wheeled.connect(self._pet_step_aside)
+        # voices: Primo and the friend read their speech bubbles out loud (see voice.py)
+        self.voice = voice.Voice(store)
+        self.pet.spoke.connect(lambda text, ms: self._speak("main", text, ms))
+        self._drawing3d: set = set()
+        self._ready3d = _Ready3D()
+        self._ready3d.ready.connect(self._3d_ready)
 
         self.rope = RopeWindow()
         # Jeo, the friend who turns up for dance showdowns: a second pet window nobody can click
@@ -67,6 +79,7 @@ class CapyRunner:
         # no blur, no dimmed box behind him; Hyprland tells the two apart by his slightly wider window)
         self.friend = PetWindow(store.settings["pet_size"])
         self.friend.set_passthrough(True)
+        self.friend.spoke.connect(lambda text, ms: self._speak("friend", text, ms))
         self._size_friend()
         self.jeo_space: FrameSet | None = None
         self.jeo_space_flip: FrameSet | None = None
@@ -209,6 +222,7 @@ class CapyRunner:
         m.addAction("💞  Touch by Touch: Jeo's solo, then the duet", lambda: self.toggle_dance("touch"))
         m.addAction("☕  Coffee break", self.coffee_break)
         m.addAction("🎭  Choose avatars (me and my dance friend)…", self.choose_avatars)
+        m.addAction("🧸  Avatar Studio: 3D looks and voices…", self.open_studio)
         rm = m.addMenu("🐉  Go for a ride")
         rm.addAction("🎲  Surprise me", lambda: self.start_ride())
         rm.addSeparator()
@@ -433,6 +447,10 @@ class CapyRunner:
         """(Re)build the frames for the current character, colour and adventure of the day."""
         s = self.store.settings
         self.frames, err = load_frames(s)
+        f3 = self._frames3d("main")
+        if f3:
+            self._use3d(self.frames, f3)
+        self._frames3d("friend")              # draw the friend in the background too, ready for the next dance
         mirror = QTransform().scale(-1, 1)
         flip = lambda fr: [f.transformed(mirror) for f in fr]  # noqa: E731
         self.flipped = FrameSet(flip(self.frames.run), self.frames.sleep, flip(self.frames.jump),
@@ -448,6 +466,61 @@ class CapyRunner:
             QTimer.singleShot(7000 if (old is None and s.get("greetings", True)) else 2500,
                               lambda: self._tsay("story", 9000))
         return err
+
+    # ---- 3D avatars (see model3d.py) ------------------------------------------------ #
+    def _frames3d(self, who: str) -> dict | None:
+        """The 3D frames for the avatar on screen or the friend, or None (2D, or still being drawn)."""
+        s = self.store.settings
+        if not s.get("avatar_3d", True) or s.get("character", "capy") != "capy":
+            return None
+        look = model3d.current_look(s, who)
+        fr = model3d.cached_frames(look)
+        if fr is None:
+            key = json.dumps(look, sort_keys=True)
+            if (who, key) not in self._drawing3d:       # draw them once in the background, 2D until then
+                self._drawing3d.add((who, key))
+                model3d.draw_in_background(look, lambda ok, w=who, k=key: self._ready3d.ready.emit(w, k))
+        return fr
+
+    @staticmethod
+    def _use3d(fs: FrameSet, f3: dict) -> None:
+        fs.run, fs.jump, fs.sleep = f3["run"], f3["jump"], f3["sleep"]
+        fs.extra["run_talk"], fs.extra["talk"] = f3["run_talk"], f3["talk"]
+        fs.extra["angry"], fs.extra["laugh"], fs.extra["tampo"] = f3["angry"], f3["laugh"], f3["sad"]
+
+    def _3d_ready(self, who: str, key: str):
+        self._drawing3d.discard((who, key))
+        if who == "main":
+            self._load_look()
+        elif not (self.dance or self.trip):
+            self.jeo = self.jeo_flip = None               # drawn again (in 3D) when next needed
+
+    # ---- voices (see voice.py) -------------------------------------------------------- #
+    def _speak(self, who: str, text: str, ms: int):
+        s = self.store.settings
+        if not s.get("voice_on") or s.get("dnd") or ms < int(s.get("voice_min_ms", 2500)):
+            return
+        if self.meeting or self.focus_end > time.time():  # quiet in calls and while you focus
+            return
+        self.voice.say(who, text)
+
+    def open_studio(self):
+        from .avatar_studio import AvatarStudio
+        if getattr(self, "_studio", None) is not None:
+            self._studio.raise_()
+            self._studio.activateWindow()
+            return
+        dlg = self._studio = AvatarStudio(self.store.settings, self.voice)
+        try:
+            ok = dlg.exec()
+        finally:
+            self._studio = None
+        if ok:
+            dlg.result_into(self.store.settings)
+            if self.store.settings.get("avatar_3d") and self.store.settings.get("character") != "capy":
+                self.store.settings["character"] = "capy"      # the 3D avatars are all capybaras
+            self.store.save_settings()
+            self.apply_settings()
 
     def _tsay(self, key: str, ms: int = 3800):
         """Say a line from the adventure of the day (if it has one, and he is allowed to tell the story)."""
@@ -531,6 +604,9 @@ class CapyRunner:
             frames = fs.sleep
         else:
             frames = fs.run
+        talking = self.voice.speaking_who == "main"
+        if talking and frames is fs.run and fs.extra.get("run_talk"):
+            frames = fs.extra["run_talk"]                    # his mouth moves while he runs and talks
         if not frames:
             self.anim.start(500)
             return
@@ -542,6 +618,8 @@ class CapyRunner:
         tray_pm = self.frames.run[self.frame_i % len(self.frames.run)] if frames is self.flipped.run else pm
         if self._on_break() and not excited and not asleep:
             pm = frames[0]                                   # standing still while chatting
+            if talking and fs.extra.get("talk"):
+                pm = fs.extra["talk"][int(time.time() * 9) % len(fs.extra["talk"])]
         special = self._special_frame(fs) if (roaming and not excited and not asleep) else None
         if not roaming and not excited and self._seated():         # staying put: join in right there
             pose = self._activity_frame(fs)
@@ -592,6 +670,8 @@ class CapyRunner:
                 max_fps = min(max_fps, 10)   # each tray frame is sent over D-Bus on Linux
             fps = 2.5 + level * (max_fps - 2.5)
             interval = int(1000 / max(1.0, fps))
+        if talking:
+            interval = min(interval, 100)                    # quick enough for the mouth to keep up
         self.anim.start(interval)
 
     # ================================================================== #
@@ -1789,6 +1869,9 @@ class CapyRunner:
             return False
         if self.jeo is None:
             self.jeo = friend_frames()
+            f3 = self._frames3d("friend")
+            if f3:
+                self._use3d(self.jeo, f3)
             self.jeo_flip = self._flip_set(self.jeo)
         pet, fr, now = self.pet, self.friend, time.time()
         screen = self.app.screenAt(pet.frameGeometry().center()) or pet.screen() or self.app.primaryScreen()
@@ -2220,6 +2303,7 @@ class CapyRunner:
 
     def quit(self):
         self.panel.quitting = True
+        self.voice.stop()
         self.idle.stop()
         self.mic.stop()
         if self.focus_quiet:
@@ -2266,6 +2350,26 @@ def _log_errors():
     threading.excepthook = lambda a: hook(a.exc_type, a.exc_value, a.exc_traceback)
 
 
+def _prefer_xwayland():
+    """On Wayland, run through XWayland so the pet can place itself, stay on top and match the window rules.
+
+    Native Wayland does not let a window choose its own position: the compositor centres the pet in a box
+    and tiles the full-screen windows (rides, rope). The installed launcher used to do this, but autostart
+    and `python -m capyrunner` skip the launcher, so it is done here for every way of starting.
+    A desktop-wide QT_QPA_PLATFORM=wayland (e.g. "wayland;xcb" on Hyprland/Omarchy) is overridden too.
+    Set CAPYRUNNER_WAYLAND=1 to keep native Wayland."""
+    if not IS_LINUX or os.environ.get("CAPYRUNNER_WAYLAND"):
+        return
+    if not (os.environ.get("WAYLAND_DISPLAY") and os.environ.get("DISPLAY")):
+        return
+    platform = os.environ.get("QT_QPA_PLATFORM", "")
+    if platform and not platform.startswith("wayland"):      # the user chose xcb (or something else) on purpose
+        return
+    import ctypes.util
+    if getattr(sys, "frozen", False) or ctypes.util.find_library("xcb-cursor"):   # Qt's xcb plugin needs it
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="capyrunner", description="Running mascot for tasks & notifications")
     ap.add_argument("--version", action="version", version=__version__)
@@ -2303,6 +2407,7 @@ def main(argv=None):
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Capytech.CapyRunner")
         except Exception:
             pass
+    _prefer_xwayland()
     app = QApplication([sys.argv[0], *qt_args])
     app.setApplicationName("CapyRunner")
     app.setDesktopFileName("capyrunner")

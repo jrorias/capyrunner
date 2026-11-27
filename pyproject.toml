@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "capyrunner"
-version = "0.5.2"
+version = "0.6.0"
 description = "A running mascot in your tray / on your desktop that reacts to your tasks, notes and notifications."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -18,6 +18,10 @@ dependencies = [
     "winrt-Windows.Foundation>=2.0; sys_platform == 'win32'",
     "winrt-Windows.Foundation.Collections>=2.0; sys_platform == 'win32'",
 ]
+
+[project.optional-dependencies]
+# natural voices for Primo and Jeo (see capyrunner/voice.py); without it the computer's own voice is used
+voice = ["piper-tts>=1.3"]
 
 [project.gui-scripts]
 capyrunner = "capyrunner.app:main"

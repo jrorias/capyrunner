@@ -70,6 +70,42 @@ The sections below are for installing from the source code instead.
 - **macOS:** Spotify and Apple Music (only while they are open; macOS asks once if CapyRunner may see them).
 The mood and the tutorial/podcast guess come from the words in the title, artist/channel and genre; nothing analyses the sound.
 
+## New in 0.6.0
+### 🎛 A new control panel
+Right-click Primo: a header with his picture and what is playing, and four tabs: **Home** (big tiles for tasks,
+breathing, focus, dancing, rides, coffee and the Avatar Studio, plus music controls), **Wellbeing**, **Fun** and
+**Settings** (switches instead of a long list of tick boxes). It keeps one size that fits your screen and scrolls
+inside. Alt+1…4 jumps between the tabs, Esc closes it.
+
+### 🧸 Avatar Studio: 3D avatars and voices
+Right-click Primo → **🧸 Avatar Studio** (or the tray menu, or the control panel).
+
+- **Primo and Jeo in 3D.** They are built from real 3D parts with light and shadow, and drawn by CapyRunner
+  itself (no 3D card or extra download needed). Drag the preview to turn them round, scroll to zoom, and watch them
+  stand, run, wave, talk, jump or nap. On your screen the 3D look is used for running, jumping, napping and talking;
+  the other poses (dances, rides, calls, work modes) are still the drawn ones for now.
+- **Change every part:** fur and snout colour, eyes (round, happy, sparkly, sleepy), rosy cheeks, head size, chubbiness,
+  ears and legs; top (hoodie, T-shirt, vest, open jacket), bottoms (shorts, long pants, skirt), shoes (sneakers, boots,
+  sandals); hat (cap, beanie, crown, bandana, bow, flower, top hat, headphones, party hat), glasses, something round the
+  neck (scarf, bow tie, tie, gold chain) and something on the back (backpack, cape, little wings), each in any colour.
+  Start from Primo, Jeo, Geelee, Koko, Luna or Tito, or press **🎲 Surprise me**.
+- **Three styles, one click each:** *Cartoon* (Primo in clothes), *Real capybara* (on four legs, coarse
+  reddish-brown fur, square snout, small ears and eyes high on the head, whiskers) and *Real capybara standing*, for
+  the warriors: **Lapu-Lapu** (beaded chest armour, woven red skirt, arm bands, kampilan), **Samurai** (dark lacquered
+  armour, headband, katana) and **Shogun** (red armour, horned kabuto helmet with the gold crest). Twelve ready-made
+  characters to start from.
+- **Moods:** calm, happy, excited, in love, sad, angry, brave, surprised and sleepy. Each one changes the eyes,
+  eyebrows, mouth, ears and cheeks, with a little effect (hearts, sparkles, an anger mark, tears, a "!"). On the
+  screen he gets angry in 3D when you pick him up, laughs it off and sulks afterwards.
+- **Voices.** Tick *Speak the speech bubbles out loud* and Primo and Jeo read their bubbles to you, each with his own
+  voice, pitch and speed, and their mouths move while they talk. The natural voices come from
+  [Piper](https://github.com/rhasspy/piper) and run on your computer: nothing is sent anywhere. Install the engine
+  from the Studio (or `pip install "capyrunner[voice]"`), then download the voices you like (~60 MB each, once).
+  Without Piper the computer's own voice is used. They stay quiet during calls, focus sessions and *Do not disturb*,
+  and skip very short bubbles (volume changes, countdowns).
+- The 3D frames are drawn once in the background (a few seconds) and kept in the data folder, so starting is quick.
+  Untick *Show my avatars in 3D* in the Studio to go back to the drawn look.
+
 ## New in 0.5.0
 ### 🐉 Rides across the screen
 Now and then (every 40 minutes, you choose) Primo rides an animal from one side of the screen to the other:

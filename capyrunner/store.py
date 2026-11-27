@@ -76,6 +76,15 @@ DEFAULT_SETTINGS = {
     "adventure_talk": True,       # tells the story of the day in the speech bubble
     # ---- Jeo, the friend, and dance showdowns (see dance.py) ------------- #
     "friend_on": True,            # Jeo turns up for dance showdowns
+    # ---- 3D avatars and voices (see model3d.py, voice.py, avatar_studio.py) ---- #
+    "avatar_3d": True,            # Primo and the friend in 3D (run, jump, nap, talk); other poses stay drawn
+    "look3d_main": None,          # the 3D look, part by part (None = made from the 2D avatar)
+    "look3d_friend": None,
+    "voice_on": False,            # read the speech bubbles out loud
+    "voice_volume": 0.9,
+    "voice_min_ms": 2500,         # only bubbles that stay up at least this long (not "🔊 40%" or a countdown)
+    "voice_main": None,           # {"voice", "pitch", "speed"} (None = the default voice)
+    "voice_friend": None,
     "friend_name": "Jeo OngBack",
     "dance_songs": True,          # a showdown starts when a dance song is playing
     "dance_every": 30,            # …and every this many minutes Jeo turns up with a challenge (0 = never)

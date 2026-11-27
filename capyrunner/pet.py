@@ -15,6 +15,7 @@ class PetWindow(QWidget):
     released = Signal()           # mouse button let go (hand keyboard focus back)
     missed = Signal()             # pressed on the empty area around the sprite
     wheeled = Signal()            # scrolled over the pet (let the scroll through)
+    spoke = Signal(str, int)      # a speech bubble went up (text, how long it stays): read it out loud
 
     BUBBLE_H = 64
 
@@ -84,6 +85,7 @@ class PetWindow(QWidget):
         self._bubble = text
         self._bubble_timer.start(ms)
         self.update()
+        self.spoke.emit(text, ms)
 
     def set_caption(self, text: str) -> None:
         if text != self._caption:
